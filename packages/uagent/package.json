@@ -1,5 +1,5 @@
 {
-  "name": "uagent",
+  "name": "@unified-agent-sdk/uagent",
   "version": "0.2.0",
   "license": "MIT",
   "publishConfig": {
