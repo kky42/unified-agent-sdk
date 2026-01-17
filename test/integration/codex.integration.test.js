@@ -27,17 +27,17 @@ test(
 		        CODEX_API_KEY: codexApiKey,
 		        OPENAI_BASE_URL: process.env.CODEX_BASE_URL,
 		      },
-		      defaultOpts: {
-		        workspace: { cwd: workspaceDir },
-		        permissions: { sandbox: true, write: false, network: false },
-		        model: process.env.CODEX_MODEL,
-		      },
-		    });
+			      defaultOpts: {
+			        workspace: { cwd: workspaceDir },
+			        access: { auto: "low", network: false, webSearch: false },
+			        model: process.env.CODEX_MODEL,
+			      },
+			    });
 
-	    const session = await runtime.openSession({
-	      sessionId: `itest-codex-${Date.now()}`,
-	      config: { provider: { modelReasoningEffort: "low" } },
-	    });
+		    const session = await runtime.openSession({
+		      sessionId: `itest-codex-${Date.now()}`,
+		      config: { reasoningEffort: "low" },
+		    });
 
     const run = await session.run({
       input: {
@@ -80,17 +80,17 @@ test(
 		        CODEX_API_KEY: codexApiKey,
 		        OPENAI_BASE_URL: process.env.CODEX_BASE_URL,
 		      },
-		      defaultOpts: {
-		        workspace: { cwd: workspaceDir },
-		        permissions: { sandbox: true, write: false, network: false },
-		        model: process.env.CODEX_MODEL,
-		      },
-		    });
+			      defaultOpts: {
+			        workspace: { cwd: workspaceDir },
+			        access: { auto: "low", network: false, webSearch: false },
+			        model: process.env.CODEX_MODEL,
+			      },
+			    });
 
-	    const session = await runtime.openSession({
-	      sessionId: `itest-codex-schema-${Date.now()}`,
-	      config: { provider: { modelReasoningEffort: "low" } },
-	    });
+		    const session = await runtime.openSession({
+		      sessionId: `itest-codex-schema-${Date.now()}`,
+		      config: { reasoningEffort: "low" },
+		    });
 
     const schema = {
       type: "array",
@@ -163,17 +163,17 @@ test(
 		        CODEX_API_KEY: codexApiKey,
 		        OPENAI_BASE_URL: process.env.CODEX_BASE_URL,
 		      },
-		      defaultOpts: {
-		        workspace: { cwd: workspaceDir },
-		        permissions: { sandbox: true, write: false, network: false },
-		        model: process.env.CODEX_MODEL,
-		      },
-		    });
+			      defaultOpts: {
+			        workspace: { cwd: workspaceDir },
+			        access: { auto: "low", network: false, webSearch: false },
+			        model: process.env.CODEX_MODEL,
+			      },
+			    });
 
-	    const session = await runtime.openSession({
-	      sessionId: `itest-codex-cancel-${Date.now()}`,
-	      config: { provider: { modelReasoningEffort: "low" } },
-	    });
+		    const session = await runtime.openSession({
+		      sessionId: `itest-codex-cancel-${Date.now()}`,
+		      config: { reasoningEffort: "low" },
+		    });
 
     const run = await session.run({
       input: {

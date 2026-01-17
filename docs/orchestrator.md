@@ -12,7 +12,7 @@ Then choose the concrete provider runtime at the composition root.
 |---|---|
 | Provider selection (`claude` vs `codex`) | composition root |
 | Workspace scope (`workspace.cwd`, `workspace.additionalDirs`) | `openSession()` |
-| Sandbox/permissions (`permissions.*`) | `openSession()` |
+| Access (`access.*`) | `openSession()` |
 | Structured output (`outputSchema`) + cancellation (`signal`) | `run()` |
 | Provider-specific knobs | `SessionConfig.provider` (and sometimes `RunConfig.provider`) |
 
@@ -22,7 +22,7 @@ Then choose the concrete provider runtime at the composition root.
 
 `createRuntime()` is intentionally thin:
 - Provider auth/endpoint/home is configured via `home` + `env` (so CLI users can reuse `~/.codex` / `~/.claude`).
-- Provider-specific knobs (like Codex `modelReasoningEffort`) live on `openSession({ config: { provider: ... } })`.
+- Unified knobs (like `reasoningEffort`) live on `openSession({ config: { ... } })` (or `createRuntime({ defaultOpts: ... })`).
 - For Claude, `createRuntime()` sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` by default for more reliable non-interactive runs (override via `env`).
 
 ```ts
@@ -38,7 +38,8 @@ const session = await runtime.openSession({
   sessionId: "s1",
   config: {
     workspace: { cwd: process.cwd() },
-    permissions: { sandbox: true, write: false, network: false },
+    reasoningEffort: "medium",
+    access: { auto: "medium", network: true, webSearch: true },
     provider: {},
   },
 });

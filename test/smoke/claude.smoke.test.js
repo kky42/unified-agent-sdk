@@ -26,7 +26,7 @@ test("Claude smoke: run completes", { timeout: 120_000 }, async () => {
     },
     defaultOpts: {
       workspace: { cwd: workspaceDir },
-      permissions: { sandbox: true, write: true, network: false },
+      access: { auto: "medium", network: false, webSearch: false },
       model: process.env.CLAUDE_MODEL,
     },
   });

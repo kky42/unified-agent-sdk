@@ -10,7 +10,7 @@ This repo’s Claude adapter (`@unified-agent-sdk/provider-claude`) wraps `@anth
 | Session model | `openSession({ config: { model } })` |
 | Per-session options (minus unified-owned keys: `cwd`, `additionalDirectories`, `resume`, `abortController`, `model`) | `openSession({ config: { provider: ClaudeSessionConfig } })` |
 | Workspace scope | `openSession({ config: { workspace } })` |
-| Unified sandbox/permissions | `openSession({ config: { permissions } })` |
+| Unified access | `openSession({ config: { access } })` |
 | Per-run overrides | `run({ config: { provider: Partial<ClaudeSessionConfig> } })` (best-effort merge) |
 | Structured output | `run({ config: { outputSchema } })` |
 | Cancellation | `run({ config: { signal } })` |
@@ -32,6 +32,16 @@ const runtime = new ClaudeRuntime({
 });
 ```
 
+#### Injecting system prompt + persistent project instructions
+
+`@anthropic-ai/claude-agent-sdk` supports a first-class `systemPrompt` option:
+
+- `systemPrompt: "..."` for a fully custom system prompt
+- `systemPrompt: { type: "preset", preset: "claude_code" }` to use Claude Code’s built-in prompt
+- `systemPrompt: { type: "preset", preset: "claude_code", append: "..." }` to append your own rules to the built-in prompt
+
+To load persistent project instructions from `CLAUDE.md`, you must opt in via `settingSources` (include `"project"`). In the unified SDK, `settingSources` is part of `ClaudeSessionConfig` / `ClaudeRuntime` defaults (see “Settings files” below).
+
 ### Session
 
 In the unified SDK, workspace maps to Claude options:
@@ -47,11 +57,7 @@ const session = await runtime.openSession({
   config: {
     workspace: { cwd: process.cwd() },
     model: process.env.CLAUDE_MODEL,
-    permissions: {
-      sandbox: true,
-      write: true,
-      network: false,
-    },
+    access: { auto: "medium", network: true, webSearch: true },
     provider: {
       // `ClaudeSessionConfig` is Claude `Options` minus unified-owned keys,
       // plus `resumeSessionId?` convenience.
@@ -77,26 +83,27 @@ const run = await session.run({
 
 #### Thinking / “think mode”
 
-In `@anthropic-ai/claude-agent-sdk`, “think mode” (aka thinking) is controlled by the thinking-token budget. To disable it, set `maxThinkingTokens: 0` in Claude options.
+In `@anthropic-ai/claude-agent-sdk`, “think mode” (aka thinking) is controlled by the thinking-token budget (`maxThinkingTokens`). In this unified SDK, it is configured via the unified `reasoningEffort` preset.
 
-In this unified SDK, you can set it at any of these layers:
+In this unified SDK, you can set it at:
 
 ```ts
-// 1) Runtime defaults (applies to every session/run)
-const runtime = new ClaudeRuntime({ defaults: { maxThinkingTokens: 0 } });
+import { createRuntime } from "@unified-agent-sdk/runtime";
 
-// 2) Session-level provider options
+// 1) Runtime defaults (applies to every session unless overridden)
+const runtime = createRuntime({
+  provider: "@anthropic-ai/claude-agent-sdk",
+  defaultOpts: { reasoningEffort: "none" }, // maps to maxThinkingTokens=0 (disable thinking)
+});
+
+// 2) Session-level override
 await runtime.openSession({
   sessionId: "s1",
-  config: { provider: { maxThinkingTokens: 0 } },
-});
-
-// 3) Run-level provider overrides (best-effort merge)
-await session.run({
-  input: { parts: [{ type: "text", text: "..." }] },
-  config: { provider: { maxThinkingTokens: 0 } },
+  config: { reasoningEffort: "high" }, // maps to maxThinkingTokens=12000
 });
 ```
+
+Mapping details are documented in `docs/config.md` under “Unified reasoning config”.
 
 Note: If you are using the Anthropic **Messages API** directly (not the Claude Agent SDK / Claude Code), “extended thinking” is configured via the `thinking` request parameter rather than `maxThinkingTokens`.
 

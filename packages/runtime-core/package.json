@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/runtime-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -16,7 +16,9 @@
       "import": "./dist/internal.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false --noEmit"

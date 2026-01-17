@@ -19,18 +19,22 @@ import { dirname } from "node:path";
 
 import { ClaudeRuntime, type ClaudeRuntimeConfig, type ClaudeSessionConfig } from "@unified-agent-sdk/provider-claude";
 import { CodexRuntime, type CodexRuntimeConfig, type CodexSessionConfig } from "@unified-agent-sdk/provider-codex";
-import type { PermissionsConfig, SessionHandle, UnifiedAgentRuntime, WorkspaceConfig } from "@unified-agent-sdk/runtime-core";
+import type { AccessConfig, ReasoningEffort, SessionHandle, UnifiedAgentRuntime, WorkspaceConfig } from "@unified-agent-sdk/runtime-core";
 import type { ThreadOptions } from "@openai/codex-sdk";
+
+import { mergeSessionConfigWithDefaults } from "./internal.js";
 
 export type EnvVars = Record<string, string | undefined>;
 
 export type DefaultOpts = {
   /** Default workspace applied to `openSession()` when omitted. */
   workspace?: WorkspaceConfig;
-  /** Default unified permissions applied to `openSession()` when omitted. */
-  permissions?: PermissionsConfig;
+  /** Default unified access applied to `openSession()` when omitted. */
+  access?: AccessConfig;
   /** Default model applied to `openSession()` when omitted. */
   model?: string;
+  /** Default reasoning effort applied to `openSession()` when omitted. */
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type CreateCodexRuntimeInit = {
@@ -112,8 +116,9 @@ function createCodexRuntime(init: CreateCodexRuntimeInit): UnifiedAgentRuntime<C
   return withSessionDefaults(runtime, {
     prepare: typeof home === "string" ? async () => void (await mkdir(home, { recursive: true })) : undefined,
     workspace: defaultOpts?.workspace,
-    permissions: defaultOpts?.permissions,
+    access: defaultOpts?.access,
     model: defaultOpts?.model,
+    reasoningEffort: defaultOpts?.reasoningEffort,
   });
 }
 
@@ -152,16 +157,18 @@ function createClaudeRuntime(
   return withSessionDefaults(runtime, {
     prepare: typeof home === "string" ? async () => void (await mkdir(home, { recursive: true })) : undefined,
     workspace: defaultOpts?.workspace,
-    permissions: defaultOpts?.permissions,
+    access: defaultOpts?.access,
     model: defaultOpts?.model,
+    reasoningEffort: defaultOpts?.reasoningEffort,
     resumeSession: async (handle) => {
       if (!handle.nativeSessionId) throw new Error("Claude resumeSession requires nativeSessionId (Claude session id).");
       return runtime.openSession({
         sessionId: handle.sessionId,
         config: {
           ...(defaultOpts?.workspace ? { workspace: defaultOpts.workspace } : {}),
-          ...(defaultOpts?.permissions ? { permissions: defaultOpts.permissions } : {}),
+          ...(defaultOpts?.access ? { access: defaultOpts.access } : {}),
           ...(defaultOpts?.model ? { model: defaultOpts.model } : {}),
+          ...(defaultOpts?.reasoningEffort ? { reasoningEffort: defaultOpts.reasoningEffort } : {}),
           provider: { resumeSessionId: handle.nativeSessionId } as ClaudeSessionConfig,
         },
       });
@@ -174,8 +181,9 @@ function withSessionDefaults<TSessionProvider, TRunProvider>(
   defaults: {
     prepare?: () => Promise<void>;
     workspace?: WorkspaceConfig;
-    permissions?: PermissionsConfig;
+    access?: AccessConfig;
     model?: string;
+    reasoningEffort?: ReasoningEffort;
     resumeSession?: (handle: SessionHandle) => ReturnType<UnifiedAgentRuntime<TSessionProvider, TRunProvider>["resumeSession"]>;
   },
 ): UnifiedAgentRuntime<TSessionProvider, TRunProvider> {
@@ -191,12 +199,7 @@ function withSessionDefaults<TSessionProvider, TRunProvider>(
     capabilities: () => runtime.capabilities(),
     openSession: async (init) => {
       await prepareOnce();
-      const merged = {
-        ...(init.config ?? {}),
-        ...(init.config?.workspace ? {} : defaults.workspace ? { workspace: defaults.workspace } : {}),
-        ...(init.config?.model ? {} : defaults.model ? { model: defaults.model } : {}),
-        ...(init.config?.permissions ? {} : defaults.permissions ? { permissions: defaults.permissions } : {}),
-      } as typeof init.config;
+      const merged = mergeSessionConfigWithDefaults(init.config, defaults) as typeof init.config;
       return runtime.openSession({ sessionId: init.sessionId, config: merged });
     },
     resumeSession: async (handle) => {

@@ -20,15 +20,15 @@ test(
 	    const workspaceDir = join(base, "workspace");
 	    await mkdir(workspaceDir, { recursive: true });
 
-	    const runtime = createRuntime({
-	      provider: "@anthropic-ai/claude-agent-sdk",
-	      home: join(base, "claude"),
-	      defaultOpts: {
-	        workspace: { cwd: workspaceDir },
-	        permissions: { sandbox: true, write: false, network: false },
-	        model: process.env.CLAUDE_MODEL,
-	      }
-	    });
+		    const runtime = createRuntime({
+		      provider: "@anthropic-ai/claude-agent-sdk",
+		      home: join(base, "claude"),
+		      defaultOpts: {
+		        workspace: { cwd: workspaceDir },
+		        access: { auto: "low", network: false, webSearch: false },
+		        model: process.env.CLAUDE_MODEL,
+		      }
+		    });
 
 	    const session = await runtime.openSession({
 	      sessionId: `itest-claude-${Date.now()}`,
@@ -71,12 +71,12 @@ test(
 	    const runtime = createRuntime({
 	      provider: "@anthropic-ai/claude-agent-sdk",
 	      home: join(base, "claude"),
-	      defaultOpts: {
-	        workspace: { cwd: workspaceDir },
-	        permissions: { sandbox: true, write: false, network: false },
-	        model: process.env.CLAUDE_MODEL,
-	      }
-	    });
+		      defaultOpts: {
+		        workspace: { cwd: workspaceDir },
+		        access: { auto: "low", network: false, webSearch: false },
+		        model: process.env.CLAUDE_MODEL,
+		      }
+		    });
 
 	    const session = await runtime.openSession({
 	      sessionId: `itest-claude-schema-${Date.now()}`,
@@ -157,12 +157,12 @@ test(
 	    const runtime = createRuntime({
 	      provider: "@anthropic-ai/claude-agent-sdk",
 	      home: join(base, "claude"),
-	      defaultOpts: {
-	        workspace: { cwd: workspaceDir },
-	        permissions: { sandbox: true, write: false, network: false },
-	        model: process.env.CLAUDE_MODEL,
-	      }
-	    });
+		      defaultOpts: {
+		        workspace: { cwd: workspaceDir },
+		        access: { auto: "low", network: false, webSearch: false },
+		        model: process.env.CLAUDE_MODEL,
+		      }
+		    });
 
 	    const session = await runtime.openSession({
 	      sessionId: `itest-claude-cancel-${Date.now()}`,

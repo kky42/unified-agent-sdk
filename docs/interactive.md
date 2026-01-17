@@ -29,6 +29,12 @@ These scripts set:
 - `--workspace .` (repo root)
 - `--home .cache/uagent/<provider>` (provider config + session state under the repo)
 
+You can also include additional workspace roots (repeat the flag):
+
+```sh
+node packages/uagent/bin/uagent.js codex --workspace . --add-dir ../shared --add-dir /tmp --auto medium
+```
+
 ## Commands
 
 While running, type `/exit` to quit.
@@ -38,11 +44,11 @@ While running, type `/exit` to quit.
 Allow network (still no writes):
 
 ```sh
-node packages/uagent/bin/uagent.js codex --workspace . --home .cache/uagent/codex --network
+node packages/uagent/bin/uagent.js codex --workspace . --home .cache/uagent/codex --auto low --network
 ```
 
-Run with full autonomy (network + writes, sandbox off):
+Run with full autonomy (no sandbox / no restrictions):
 
 ```sh
-node packages/uagent/bin/uagent.js claude --workspace . --home .cache/uagent/claude --yolo
+node packages/uagent/bin/uagent.js claude --workspace . --home .cache/uagent/claude --auto high
 ```

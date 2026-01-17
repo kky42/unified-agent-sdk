@@ -42,6 +42,8 @@ The goal is that an orchestrator can be written once against `UnifiedAgentRuntim
 | Claude-specific behavior | `docs/claude.md` |
 | Codex-specific behavior | `docs/codex.md` |
 
+Before running manual agent behavior tests (for example `uagent exec` / smoke / integration), read `docs/testing.md` and follow the temporary-workspace approach to avoid damaging the user’s machine.
+
 ## Development commands
 
 - `npm run typecheck`

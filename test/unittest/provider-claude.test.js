@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import test from "node:test";
 
 import { ClaudeRuntime } from "@unified-agent-sdk/provider-claude";
@@ -148,7 +151,7 @@ test("Claude adapter wraps non-object outputSchema roots and unwraps structuredO
   assert.deepEqual(done.structuredOutput, [1, 2, 3]);
 });
 
-test("Claude adapter maps tool_progress to tool.call (deduped by tool_use_id)", async () => {
+test("Claude adapter forwards tool_progress as provider.event (not tool.call)", async () => {
   const runtime = new ClaudeRuntime({
     query: () =>
       (async function* () {
@@ -186,37 +189,38 @@ test("Claude adapter maps tool_progress to tool.call (deduped by tool_use_id)", 
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const toolCalls = [];
+  const providerEvents = [];
   for await (const ev of run.events) {
     if (ev.type === "tool.call") toolCalls.push(ev);
+    if (ev.type === "provider.event") providerEvents.push(ev);
   }
 
-  assert.equal(toolCalls.length, 1);
-  assert.equal(toolCalls[0].toolName, "WebSearch");
-  assert.equal(toolCalls[0].callId, "tool_1");
+  assert.equal(toolCalls.length, 0);
+  assert.equal(providerEvents.length, 2);
+  assert.equal(providerEvents[0].payload?.type, "tool_progress");
+  assert.equal(providerEvents[1].payload?.type, "tool_progress");
 });
 
-test("Claude adapter maps unified SessionConfig.permissions into Claude options (2x2x2 + yolo)", async (t) => {
-  const cases = [];
-  for (const network of [false, true]) {
-    for (const sandbox of [false, true]) {
-      for (const write of [false, true]) {
-        cases.push({ name: `network=${network} sandbox=${sandbox} write=${write}`, permissions: { network, sandbox, write } });
+test("Claude adapter maps unified SessionConfig.access into Claude options (auto x network x webSearch + default)", async (t) => {
+  const cases = [{ name: "default", access: undefined }];
+  for (const auto of ["low", "medium", "high"]) {
+    for (const network of [false, true]) {
+      for (const webSearch of [false, true]) {
+        cases.push({ name: `auto=${auto} network=${network} webSearch=${webSearch}`, access: { auto, network, webSearch } });
       }
     }
   }
-  cases.push({ name: "yolo", permissions: { yolo: true } });
 
   for (const c of cases) {
     await t.test(c.name, async () => {
       const runtime = new ClaudeRuntime({
         query: ({ options }) =>
           (async function* () {
-            const yolo = Boolean(c.permissions.yolo);
-            const expectedNetwork = yolo ? true : Boolean(c.permissions.network);
-            const expectedWrite = yolo ? true : Boolean(c.permissions.write);
-            const expectedSandbox = yolo ? false : Boolean(c.permissions.sandbox);
+            const auto = c.access?.auto ?? "medium";
+            const expectedNetwork = c.access?.network ?? true;
+            const expectedWebSearch = c.access?.webSearch ?? true;
 
-            if (yolo) {
+            if (auto === "high") {
               assert.equal(options.permissionMode, "bypassPermissions");
               assert.equal(options.allowDangerouslySkipPermissions, true);
               assert.equal(options.sandbox?.enabled, false);
@@ -224,8 +228,11 @@ test("Claude adapter maps unified SessionConfig.permissions into Claude options 
               assert.equal(options.permissionPromptToolName, undefined);
             } else {
               assert.equal(options.permissionMode, "default");
-              assert.equal(options.sandbox?.enabled, expectedSandbox);
-              assert.equal(options.sandbox?.autoAllowBashIfSandboxed, false);
+              assert.equal(options.sandbox?.enabled, auto === "medium");
+              if (auto === "medium") {
+                assert.equal(options.sandbox?.autoAllowBashIfSandboxed, false);
+                assert.equal(options.sandbox?.allowUnsandboxedCommands, false);
+              }
               assert.equal(typeof options.canUseTool, "function");
               assert.equal(options.permissionPromptToolName, undefined);
 
@@ -236,17 +243,30 @@ test("Claude adapter maps unified SessionConfig.permissions into Claude options 
 
               assert.equal((await decisionFor("AskUserQuestion")).behavior, "deny");
               assert.equal((await decisionFor("WebFetch")).behavior, expectedNetwork ? "allow" : "deny");
-              assert.equal((await decisionFor("WebSearch")).behavior, expectedNetwork ? "allow" : "deny");
+              assert.equal((await decisionFor("WebSearch")).behavior, expectedWebSearch ? "allow" : "deny");
 
               assert.equal((await decisionFor("Read")).behavior, "allow");
               assert.equal((await decisionFor("Grep")).behavior, "allow");
 
-              assert.equal((await decisionFor("Write")).behavior, expectedWrite ? "allow" : "deny");
-              assert.equal((await decisionFor("Edit")).behavior, expectedWrite ? "allow" : "deny");
+              assert.equal((await decisionFor("Write")).behavior, auto === "medium" ? "allow" : "deny");
+              assert.equal((await decisionFor("Edit")).behavior, auto === "medium" ? "allow" : "deny");
               assert.equal((await decisionFor("Bash", { command: "rg -n hello README.md" })).behavior, "allow");
-              const bashDenied = await decisionFor("Bash", { command: "echo hi > /tmp/x" });
-              assert.equal(bashDenied.behavior, expectedWrite ? "allow" : "deny");
-              if (!expectedWrite) assert.equal(bashDenied.interrupt, false);
+
+              if (auto === "low") {
+                const bashDenied = await decisionFor("Bash", { command: "echo hi > /tmp/x" });
+                assert.equal(bashDenied.behavior, "deny");
+                assert.equal(bashDenied.interrupt, false);
+                assert.equal((await decisionFor("Bash", { command: "find . -delete" })).behavior, "deny");
+                assert.equal((await decisionFor("Bash", { command: "find . -maxdepth 1 -exec echo hi \\;" })).behavior, "deny");
+                assert.equal((await decisionFor("Bash", { command: "find . -maxdepth 1 -name '*.md' -print" })).behavior, "allow");
+                const curlDecision = await decisionFor("Bash", { command: "curl https://example.com" });
+                assert.equal(curlDecision.behavior, expectedNetwork ? "allow" : "deny");
+              } else {
+                const bashAllowed = await decisionFor("Bash", { command: "echo hi > /tmp/x" });
+                assert.equal(bashAllowed.behavior, "allow");
+                const bashEscape = await decisionFor("Bash", { command: "echo hi", dangerouslyDisableSandbox: true });
+                assert.equal(bashEscape.behavior, "deny");
+              }
             }
 
             yield {
@@ -263,7 +283,7 @@ test("Claude adapter maps unified SessionConfig.permissions into Claude options 
 
       const session = await runtime.openSession({
         sessionId: "s_perm",
-        config: { workspace: { cwd: process.cwd() }, permissions: c.permissions },
+        config: { workspace: { cwd: process.cwd() }, ...(c.access ? { access: c.access } : {}) },
       });
       const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
@@ -279,7 +299,47 @@ test("Claude adapter maps unified SessionConfig.permissions into Claude options 
   }
 });
 
-test("Claude adapter denies out-of-workspace writes when sandbox=true (but allows reads elsewhere)", async () => {
+test("Claude adapter maps unified SessionConfig.reasoningEffort into options.maxThinkingTokens", async (t) => {
+  const cases = [
+    { name: "default", reasoningEffort: undefined, expected: 8_000 },
+    { name: "none", reasoningEffort: "none", expected: 0 },
+    { name: "low", reasoningEffort: "low", expected: 4_000 },
+    { name: "medium", reasoningEffort: "medium", expected: 8_000 },
+    { name: "high", reasoningEffort: "high", expected: 12_000 },
+    { name: "xhigh", reasoningEffort: "xhigh", expected: 16_000 },
+  ];
+
+  for (const c of cases) {
+    await t.test(c.name, async () => {
+      const runtime = new ClaudeRuntime({
+        query: ({ options }) =>
+          (async function* () {
+            assert.equal(options.maxThinkingTokens, c.expected);
+            yield {
+              type: "result",
+              subtype: "success",
+              result: "ok",
+              structured_output: null,
+              total_cost_usd: 0,
+              duration_ms: 1,
+              usage: {},
+            };
+          })(),
+      });
+
+      const session = await runtime.openSession({
+        sessionId: `s_reasoning_${c.name}`,
+        config: { workspace: { cwd: process.cwd() }, ...(c.reasoningEffort ? { reasoningEffort: c.reasoningEffort } : {}) },
+      });
+
+      const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
+      const done = await run.result;
+      assert.equal(done.status, "success");
+    });
+  }
+});
+
+test("Claude adapter denies out-of-workspace writes when auto=medium (but allows reads elsewhere)", async () => {
   const runtime = new ClaudeRuntime({
     query: ({ options }) =>
       (async function* () {
@@ -299,6 +359,13 @@ test("Claude adapter denies out-of-workspace writes when sandbox=true (but allow
         );
         assert.equal(denied.behavior, "deny");
 
+        const traversal = await options.canUseTool(
+          "Write",
+          { file_path: `${process.cwd()}/sub/../../outside.md`, content: "nope" },
+          { blockedPath: `${process.cwd()}/sub/../../outside.md` },
+        );
+        assert.equal(traversal.behavior, "deny");
+
         const readOutside = await options.canUseTool("Read", { file_path: "/etc/hosts" }, { blockedPath: "/etc/hosts" });
         assert.equal(readOutside.behavior, "allow");
 
@@ -316,11 +383,69 @@ test("Claude adapter denies out-of-workspace writes when sandbox=true (but allow
 
   const session = await runtime.openSession({
     sessionId: "s_sandbox_scope",
-    config: { workspace: { cwd: process.cwd() }, permissions: { sandbox: true, write: true, network: false } },
+    config: { workspace: { cwd: process.cwd() }, access: { auto: "medium", network: true, webSearch: true } },
   });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
   for await (const _ev of run.events) {
     // drain
+  }
+});
+
+test("Claude adapter denies workspace escapes via symlinks when auto=medium", async (t) => {
+  if (process.platform === "win32") t.skip("symlink behavior varies on Windows environments");
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "uagent-workspace-"));
+  const workspaceDir = path.join(tmp, "ws");
+  const outsideDir = path.join(tmp, "outside");
+  const linkDir = path.join(workspaceDir, "link");
+  try {
+    fs.mkdirSync(workspaceDir);
+    fs.mkdirSync(outsideDir);
+    try {
+      fs.symlinkSync(outsideDir, linkDir, "dir");
+    } catch (e) {
+      t.skip(`unable to create symlink: ${e}`);
+    }
+
+    const runtime = new ClaudeRuntime({
+      query: ({ options }) =>
+        (async function* () {
+          assert.equal(typeof options.canUseTool, "function");
+
+          const allowed = await options.canUseTool(
+            "Write",
+            { file_path: `${workspaceDir}/ok.md`, content: "hi" },
+            { blockedPath: `${workspaceDir}/ok.md` },
+          );
+          assert.equal(allowed.behavior, "allow");
+
+          const denied = await options.canUseTool(
+            "Write",
+            { file_path: `${linkDir}/escape.md`, content: "nope" },
+            { blockedPath: `${linkDir}/escape.md` },
+          );
+          assert.equal(denied.behavior, "deny");
+
+          yield {
+            type: "result",
+            subtype: "success",
+            result: "ok",
+            structured_output: { ok: true },
+            total_cost_usd: 0,
+            duration_ms: 1,
+            usage: {},
+          };
+        })(),
+    });
+
+    const session = await runtime.openSession({
+      sessionId: "s_symlink_escape",
+      config: { workspace: { cwd: workspaceDir }, access: { auto: "medium", network: true, webSearch: true } },
+    });
+    const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
+    await run.result;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

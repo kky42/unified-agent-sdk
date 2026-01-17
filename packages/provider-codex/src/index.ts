@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Codex, type CodexOptions, type Thread, type ThreadEvent, type ThreadOptions } from "@openai/codex-sdk";
 import type {
-  PermissionsConfig,
+  AccessConfig,
   ProviderId,
+  ReasoningEffort,
   RunHandle,
   RunRequest,
   RuntimeCapabilities,
@@ -15,12 +16,12 @@ import type {
   UUID,
   WorkspaceConfig,
 } from "@unified-agent-sdk/runtime-core";
-import { asText, SessionBusyError } from "@unified-agent-sdk/runtime-core";
+import { SessionBusyError } from "@unified-agent-sdk/runtime-core";
 import { AsyncEventStream, normalizeStructuredOutputSchema } from "@unified-agent-sdk/runtime-core/internal";
 
 export const PROVIDER_CODEX_SDK = "@openai/codex-sdk" as ProviderId;
 
-type UnifiedOwnedCodexKeys = "workingDirectory" | "additionalDirectories" | "model";
+type UnifiedOwnedCodexKeys = "workingDirectory" | "additionalDirectories" | "model" | "modelReasoningEffort";
 export type CodexSessionConfig = Omit<ThreadOptions, UnifiedOwnedCodexKeys>;
 
 export type CodexRuntimeConfig = {
@@ -67,9 +68,10 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
     config?: SessionConfig<CodexSessionConfig>;
   }): Promise<UnifiedSession<CodexSessionConfig, never>> {
     const provider: CodexSessionConfig = init.config?.provider ?? {};
-    const permissions = init.config?.permissions;
-    const permissionOptions = permissions ? mapUnifiedPermissionsToCodex(permissions) : {};
+    const access = normalizeAccess(init.config?.access);
+    const accessOptions = mapUnifiedAccessToCodex(access);
     const model = init.config?.model;
+    const reasoningEffort = init.config?.reasoningEffort ?? "medium";
     const threadOptions: ThreadOptions = {
       ...(this.defaults ?? {}),
       ...provider,
@@ -78,7 +80,8 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
         workingDirectory: init.config.workspace.cwd,
         additionalDirectories: init.config.workspace.additionalDirs,
       }),
-      ...permissionOptions,
+      ...accessOptions,
+      modelReasoningEffort: mapReasoningEffortToCodex(reasoningEffort),
     };
     const thread = this.codex.startThread(threadOptions);
     return new CodexSession({ sessionId: init.sessionId, thread });
@@ -602,46 +605,34 @@ function truncate(text: string, maxLen = 500): string {
   return `${t.slice(0, maxLen)}…`;
 }
 
-function normalizePermissions(input: PermissionsConfig): Required<PermissionsConfig> {
-  const yolo = Boolean(input.yolo);
+function normalizeAccess(input: AccessConfig | undefined): Required<AccessConfig> {
   return {
-    yolo,
-    network: yolo ? true : Boolean(input.network),
-    write: yolo ? true : Boolean(input.write),
-    sandbox: yolo ? false : Boolean(input.sandbox),
+    auto: input?.auto ?? "medium",
+    network: input?.network ?? true,
+    webSearch: input?.webSearch ?? true,
   };
 }
 
-function mapUnifiedPermissionsToCodex(input: PermissionsConfig): Partial<ThreadOptions> {
-  const p = normalizePermissions(input);
-
-  // Disable interactive approvals entirely; rely on sandbox/write/network constraints instead.
+function mapUnifiedAccessToCodex(access: Required<AccessConfig>): Partial<ThreadOptions> {
+  // Non-interactive by default; rely on sandbox boundaries instead of approval prompts.
   const approvalPolicy: ThreadOptions["approvalPolicy"] = "never";
 
-  // Codex uses sandbox modes as the primary enforcement mechanism.
-  //
-  // Mapping:
-  // - sandbox=true,  write=false => read-only
-  // - sandbox=true,  write=true  => workspace-write
-  // - sandbox=false, write=true  => danger-full-access (unsafe; effectively YOLO-like)
-  // - sandbox=false, write=false => force read-only (cannot express "no sandbox but no writes" safely)
-  //
-  // Note: `danger-full-access` implies broad access regardless of other toggles in some Codex builds.
-  const sandboxMode: ThreadOptions["sandboxMode"] = p.yolo
-    ? "danger-full-access"
-    : !p.write
-      ? "read-only"
-      : p.sandbox
-        ? "workspace-write"
-        : "danger-full-access";
+  const sandboxMode: ThreadOptions["sandboxMode"] =
+    access.auto === "low" ? "read-only" : access.auto === "medium" ? "workspace-write" : "danger-full-access";
+  const unrestricted = access.auto === "high";
 
   return {
     approvalPolicy,
     sandboxMode,
-    networkAccessEnabled: p.network,
-    // Web search requires network; treat it as part of the unified `network` flag.
-    webSearchEnabled: p.network,
+    // auto=high means "no restraints": always enable network + web search.
+    networkAccessEnabled: unrestricted ? true : access.network,
+    webSearchEnabled: unrestricted ? true : access.webSearch,
   };
+}
+
+function mapReasoningEffortToCodex(effort: ReasoningEffort): NonNullable<ThreadOptions["modelReasoningEffort"]> {
+  if (effort === "none") return "minimal";
+  return effort;
 }
 
 function normalizeRunInput<TRunProvider>(req: RunRequest<TRunProvider>): { input: string; images: string[] } {
@@ -649,17 +640,32 @@ function normalizeRunInput<TRunProvider>(req: RunRequest<TRunProvider>): { input
     throw new Error("Codex adapter does not support streaming input (AsyncIterable<TurnInput>) yet.");
   }
   const turns = Array.isArray(req.input) ? req.input : [req.input];
-  const merged = turns.map(asText).join("\n\n");
   const images: string[] = [];
+  let imageIndex = 0;
+
+  const turnTexts: string[] = [];
   for (const turn of turns) {
+    const blocks: string[] = [];
     for (const part of turn.parts) {
-      if (part.type === "local_image") images.push(part.path);
-      if (part.type !== "text" && part.type !== "local_image") {
-        throw new Error(`Unsupported content part for Codex adapter: ${(part as { type: string }).type}`);
+      if (part.type === "text") {
+        blocks.push(part.text);
+        continue;
       }
+      if (part.type === "local_image") {
+        images.push(part.path);
+        imageIndex += 1;
+        blocks.push(`[Image #${imageIndex}]`);
+        continue;
+      }
+      throw new Error(`Unsupported content part for Codex adapter: ${(part as { type: string }).type}`);
     }
+    turnTexts.push(blocks.join("\n\n"));
   }
-  return { input: merged, images };
+
+  // Note: Codex CLI attaches images to the initial prompt (not truly interleaved).
+  // To preserve user intent as much as possible, we inject stable placeholders into the prompt text
+  // at the position where each image appeared in the unified input.
+  return { input: turnTexts.join("\n\n"), images };
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {

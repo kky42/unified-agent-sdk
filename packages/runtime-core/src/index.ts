@@ -31,22 +31,48 @@ export interface WorkspaceConfig {
 }
 
 /**
- * Unified sandbox/permission controls.
+ * Unified access controls.
  *
  * Notes:
  * - Providers differ in what can be enforced without an OS sandbox.
- * - `yolo` is an opinionated shortcut for "full autonomy": enables network + write and disables sandbox.
+ * - This is intentionally small and maps to provider-native primitives (Codex sandbox modes, Claude permission modes).
  */
-export type PermissionsConfig = {
-  /** Allow outbound network access (provider-dependent). */
+export type AccessLevel = "low" | "medium" | "high";
+
+export type AccessConfig = {
+  /**
+   * High-level access preset.
+   * - low: read-only
+   * - medium: sandboxed writes/commands/tools
+   * - high: unrestricted (no sandbox / bypass)
+   */
+  auto?: AccessLevel;
+  /**
+   * Allow outbound network access (provider-dependent).
+   *
+   * Notes:
+   * - For Codex, this controls sandboxed command network access.
+   * - For Claude, this controls network-capable tools (WebFetch) and network-ish Bash commands.
+   */
   network?: boolean;
-  /** Enable provider sandboxing when available. */
-  sandbox?: boolean;
-  /** Allow filesystem writes and other mutating actions (provider-dependent). */
-  write?: boolean;
-  /** Shortcut for full autonomy: sets `network=true`, `write=true`, `sandbox=false`. */
-  yolo?: boolean;
+  /**
+   * Allow the provider web search tool (provider-dependent).
+   *
+   * Notes:
+   * - For Codex, this controls the `web_search` tool.
+   * - For Claude, this controls the `WebSearch` tool.
+   */
+  webSearch?: boolean;
 };
+
+/**
+ * Unified reasoning “effort” / thinking budget preset.
+ *
+ * Notes:
+ * - Codex maps this to `ThreadOptions.modelReasoningEffort` (`minimal|low|medium|high|xhigh`).
+ * - Claude maps this to a thinking token budget (`maxThinkingTokens`).
+ */
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
 
 export type ProviderConfig = Record<string, unknown>;
 
@@ -65,10 +91,19 @@ export interface SessionConfig<TProvider = ProviderConfig> {
    */
   model?: string;
   /**
-   * Unified sandbox/permission controls applied by provider adapters.
-   * When omitted, provider-specific config remains the source of truth.
+   * Unified reasoning-effort preset.
+   *
+   * Semantics:
+   * - Omitted: provider adapters default to `"medium"`.
+   * - `"none"`: lowest effort (Codex `"minimal"`, Claude `maxThinkingTokens=0`).
+   *
+   * This is unified-owned; provider configs should not be the source of truth for this knob.
    */
-  permissions?: PermissionsConfig;
+  reasoningEffort?: ReasoningEffort;
+  /**
+   * Unified access controls applied by provider adapters.
+   */
+  access?: AccessConfig;
   /**
    * Provider-specific session configuration (opaque to runtime-core).
    * Each provider package exports strongly-typed shapes for this value.

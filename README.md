@@ -1,25 +1,43 @@
 # Unified Agent SDK
 
-Build an orchestrator once against a **single runtime/session interface**, then swap agent backends at the composition root.
+Build an orchestrator once, run it anywhere. This SDK gives you a single runtime/session API that works across providers, so you can swap **Claude** or **Codex** at the composition root without rewriting your orchestration logic.
 
-This SDK unifies:
-- **Configuration** (`workspace`, `model`, `outputSchema`, `signal`) + explicit provider config
-- **Permissions** (`sandbox` / `write` / `network` / `yolo`) mapped by adapters
-- **Session behavior** (`openSession()` + `run()` + a consistent `RuntimeEvent` stream)
+If you’ve ever thought “I want a single agent layer that won’t lock me into one provider,” this is for you.
 
-**Supported providers (today):**
-- Anthropic Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
-- OpenAI Codex SDK (`@openai/codex-sdk`)
+## Why this is different
 
-**Planned:** OpenCode + other agent SDK adapters.
+- **One interface, many providers**: `UnifiedAgentRuntime` + `UnifiedSession` cover run lifecycle, streaming events, and structured output.
+- **Portable config**: workspace, model, access, reasoning effort, output schema, cancellation.
+- **Predictable event stream**: every provider maps into the same `RuntimeEvent` shape.
 
-## 1. Target & advantages
+This is the boring, reliable core you can build real orchestrators on.
 
-The goal is portability: write orchestration logic once against `UnifiedAgentRuntime` / `UnifiedSession`, then choose the provider runtime when you bootstrap your app.
+## How it works (diagram placeholder)
 
-You get a consistent `UnifiedSession.run()` API, a common `RuntimeEvent` stream, and a small unified config surface so providers don’t leak throughout your codebase.
+```
+[Your App / Orchestrator]
+            |
+            v
+   UnifiedAgentRuntime
+            |
+    +-------+-----------------+--------------------+
+    |                         |                    |
+    v                         v                    v
+ Claude Adapter           Codex Adapter     (Planned) OpenCode
+                                                (Planned) Gemini CLI
+```
 
-## 2. Basic use case
+*(Replace with an image path later, e.g. `docs/assets/diagram.png`.)*
+
+## Quick start (runtime)
+
+Install the runtime:
+
+```sh
+npm install @unified-agent-sdk/runtime
+```
+
+Then:
 
 ```ts
 import { createRuntime, SessionBusyError } from "@unified-agent-sdk/runtime";
@@ -34,8 +52,8 @@ const session = await runtime.openSession({
   sessionId: "demo",
   config: {
     workspace: { cwd: process.cwd() },
-    permissions: { sandbox: true, write: false, network: false },
-    provider: {},
+    reasoningEffort: "medium",
+    access: { auto: "medium", network: true, webSearch: true },
   },
 });
 
@@ -45,16 +63,11 @@ try {
     config: { outputSchema: { type: "object", additionalProperties: true } },
   });
 
-  // Option A: stream events (single-consumer; optional).
   for await (const ev of run.events) {
     if (ev.type === "assistant.delta") process.stdout.write(ev.textDelta);
     if (ev.type === "run.completed") console.log("\n", ev.status, ev.structuredOutput);
   }
-
-  // Option B: only await the final result (no need to consume events).
-  // const done = await run.result;
 } catch (e) {
-  // Sessions are single-flight: queue/schedule in your orchestrator.
   if (e instanceof SessionBusyError) console.error("Session busy:", e.activeRunId);
   else throw e;
 } finally {
@@ -63,44 +76,115 @@ try {
 }
 ```
 
-## 3. Install
+## Try it in 60 seconds (`uagent`)
 
-From npm (once published):
+`uagent` is a tiny CLI that lets you test the runtime with real providers.
 
-```sh
-npm install @unified-agent-sdk/runtime
-```
-
-Then install at least one provider SDK (they are peer dependencies of the adapters):
+Install:
 
 ```sh
-# Codex
-npm install @openai/codex-sdk
-
-# Claude
-npm install @anthropic-ai/claude-agent-sdk zod@^4
+npm install -g @unified-agent-sdk/uagent
 ```
 
-From source (this repo):
+One‑shot exec:
 
 ```sh
-npm install
-npm run build
+uagent codex exec \
+  --home .cache/uagent/codex \
+  --workspace . \
+  "List the files in the workspace."
 ```
 
-## 4. Configuration & permissions
+Interactive mode:
 
-The unified surface area is intentionally small:
-- **Session config** (`openSession({ config })`): `workspace`, `model`, `permissions`, `provider`
-- **Run config** (`run({ config })`): `outputSchema`, `signal`, plus provider overrides where supported
+```sh
+uagent claude \
+  --home .cache/uagent/claude \
+  --workspace .
+```
 
-Unified permissions live on `SessionConfig.permissions`:
-- `network`: allow outbound network + web search where supported
-- `write`: allow filesystem writes / other mutating actions
-- `sandbox`: enable provider sandboxing / workspace scoping where supported
-- `yolo`: shorthand for full autonomy (`network=true`, `write=true`, `sandbox=false`)
+Verbose exec (shows tools + reasoning blocks):
 
-Read these next:
-- [`docs/config.md`](docs/config.md) — unified vs provider config (with comparison tables)
-- [`docs/permission.md`](docs/permission.md) — permission mapping details (Codex vs Claude)
-- [`docs/orchestrator.md`](docs/orchestrator.md) — orchestrator wiring + `createRuntime()`
+```sh
+uagent codex exec \
+  --home .cache/uagent/codex \
+  --workspace . \
+  --verbose \
+  "List the files in the workspace."
+```
+
+## Unified config at a glance
+
+| Config | Where | What it does |
+|---|---|---|
+| `workspace` | `openSession({ config })` | Filesystem scope for the session |
+| `model` | `openSession({ config })` | Provider model id |
+| `reasoningEffort` | `openSession({ config })` | Portable thinking budget |
+| `access` | `openSession({ config })` | Portable permission surface |
+| `outputSchema` | `run({ config })` | Structured output (JSON Schema) |
+| `signal` | `run({ config })` | Cancellation |
+
+### Access (most important for safety)
+
+Access is unified across providers. You control it with `access.auto`, `access.network`, and `access.webSearch`.
+
+**Presets:**
+
+| `access.auto` | Meaning |
+|---|---|
+| `low` | Read‑only. Blocks edits and dangerous commands. |
+| `medium` | Sandbox writes/commands inside the workspace. |
+| `high` | Unrestricted (use with care). |
+
+**Toggles:**
+
+| Field | Effect |
+|---|---|
+| `access.network` | Allow outbound network (Bash/WebFetch). |
+| `access.webSearch` | Allow the provider WebSearch tool. |
+
+### Reasoning effort (portable)
+
+Control how much “thinking” the model uses:
+
+`none` · `low` · `medium` · `high` · `xhigh`
+
+Example:
+
+```ts
+const session = await runtime.openSession({
+  sessionId: "s1",
+  config: { reasoningEffort: "low" },
+});
+```
+
+### Model selection
+
+Models are provider‑specific but configured the same way:
+
+```ts
+const session = await runtime.openSession({
+  sessionId: "s1",
+  config: { model: "gpt-5.2" },
+});
+```
+
+## Provider support
+
+- **Claude** (`@anthropic-ai/claude-agent-sdk`)
+- **Codex** (`@openai/codex-sdk`)
+
+Both map into the same runtime and event model.
+
+**Planned:** OpenCode, Gemini CLI
+
+## Learn more
+
+- `docs/config.md` — full config reference
+- `docs/permission.md` — access mapping details
+- `docs/orchestrator.md` — orchestration patterns
+- `docs/testing.md` — smoke/integration tests
+**What does `--home` mean?**  
+`--home` points to the provider’s config directory. It lets you keep per‑profile settings
+and auth separate (for example, `.profiles/codex/yescode` or `.profiles/claude/yescode`).
+If omitted, the provider uses its default location (e.g. `~/.codex` or `~/.claude`).

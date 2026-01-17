@@ -9,9 +9,10 @@ This repo’s Codex adapter (`@unified-agent-sdk/provider-codex`) wraps `@openai
 | Runtime defaults (sandbox, approvals, web search, etc.) | `new CodexRuntime({ defaults: ThreadOptions })` |
 | Client connection/auth (`apiKey`, `baseUrl`) | `new CodexRuntime({ client: CodexOptions })` |
 | Session model | `openSession({ config: { model } })` |
+| Reasoning effort | `openSession({ config: { reasoningEffort } })` |
 | Per-session options (minus unified-owned keys: `workingDirectory`, `additionalDirectories`, `model`) | `openSession({ config: { provider: CodexSessionConfig } })` |
 | Workspace scope | `openSession({ config: { workspace } })` |
-| Unified sandbox/permissions | `openSession({ config: { permissions } })` |
+| Unified access | `openSession({ config: { access } })` |
 | Per-run structured output + cancellation | `run({ config: { outputSchema, signal } })` |
 | Run-level provider config | **Not supported** (`RunConfig.provider` is typed as `never`) |
 
@@ -25,8 +26,8 @@ import { CodexRuntime } from "@unified-agent-sdk/provider-codex";
 const runtime = new CodexRuntime({
   client: { apiKey: process.env.OPENAI_API_KEY, baseUrl: process.env.CODEX_BASE_URL },
   defaults: {
-    // You can set provider defaults here, but prefer `SessionConfig.permissions`
-    // for orchestrator-friendly, portable sandbox/permission controls.
+    // You can set provider defaults here, but prefer `SessionConfig.access`
+    // for orchestrator-friendly, portable access controls.
     sandboxMode: "read-only",
     approvalPolicy: "never",
     webSearchEnabled: false,
@@ -50,15 +51,12 @@ const session = await runtime.openSession({
   config: {
     workspace: { cwd: process.cwd(), additionalDirs: ["/tmp"] },
     model: process.env.CODEX_MODEL,
-    permissions: {
-      sandbox: true,
-      write: false,
-      network: false,
-    },
+    reasoningEffort: "medium",
+    access: { auto: "medium", network: true, webSearch: true },
     provider: {
       // `CodexSessionConfig` is `ThreadOptions` minus unified-owned keys.
-      // Use this for other Codex knobs; `permissions` is the preferred place
-      // for sandbox/network/write behavior.
+      // Use this for other Codex knobs; `access` is the preferred place
+      // for sandbox/network/webSearch behavior.
     },
   },
 });
@@ -72,6 +70,10 @@ const run = await session.run({
   config: { outputSchema: { type: "object" } },
 });
 ```
+
+#### Images and ordering
+
+Codex attaches images to the initial prompt (via `--image`) and does not support true text↔image interleaving. When you pass `local_image` parts, this SDK injects stable placeholders like `[Image #1]` into the prompt text at the position where each image appeared, and attaches images in the same encounter order (Image #1 = first attached image, etc.).
 
 #### Non-object root schemas
 
@@ -90,13 +92,14 @@ Controls the policy for model-generated shell commands:
 - `"workspace-write"`: allows edits + command execution in the working directory and any `additionalDirectories`.
 - `"danger-full-access"`: removes sandbox restrictions (use with extreme caution).
 
-#### How unified `permissions` map to `sandboxMode`
+#### How unified `access.auto` maps to `sandboxMode`
 
-When using `@unified-agent-sdk/runtime` / `SessionConfig.permissions`, the Codex adapter maps:
-- `sandbox=true, write=false` → `sandboxMode: "read-only"`
-- `sandbox=true, write=true` → `sandboxMode: "workspace-write"`
-- `sandbox=false, write=true` → `sandboxMode: "danger-full-access"` (**unsafe; effectively YOLO-like**)
-- `sandbox=false, write=false` → `sandboxMode: "read-only"` (forced; “no sandbox but no writes” isn’t safely representable)
+When using `@unified-agent-sdk/runtime` / `SessionConfig.access`, the Codex adapter maps:
+- `auto="low"` → `sandboxMode: "read-only"`
+- `auto="medium"` → `sandboxMode: "workspace-write"`
+- `auto="high"` → `sandboxMode: "danger-full-access"` (**unsafe; unrestricted**)
+
+Note: `auto="high"` is treated as “no restraints”; this SDK enables Codex network + web search regardless of `access.network` / `access.webSearch` in this mode.
 
 Note: some Codex builds treat `"danger-full-access"` as broadly permissive regardless of other toggles (including network).
 
@@ -128,6 +131,19 @@ Codex separates “local network” from “web search”:
 ### Global config (still applies)
 
 Codex also reads global configuration (for example `~/.codex/config.toml`), and deployments can enforce repo-level constraints via `requirements.toml` (for example “always read-only” or “never bypass approvals”). If you need settings beyond what `ThreadOptions` exposes, set them in Codex’s config files.
+
+## Injecting “system prompt” style instructions
+
+Codex’s “system prompt” equivalent comes from the **Codex CLI** (which `@openai/codex-sdk` spawns). In practice, you inject persistent instructions via **instruction files + config**, not via a per-turn `systemPrompt` parameter.
+
+Common approaches:
+
+- **Per-repo / per-directory instructions:** add `AGENTS.md` files in your repo (more-specific nested `AGENTS.md` applies to its subtree).
+- **Global / profile defaults:** set `CODEX_HOME` (defaults to `~/.codex`) and put config + instruction files there (for example `config.toml`, `AGENTS.md`, `AGENTS.override.md`).
+- **Config-based injection:** set `developer_instructions` (for example in `config.toml`, or via the CLI `-c` / `--config` override flag).
+- **Experimental override:** `experimental_instructions_file` can be used to point Codex at a replacement instruction file (advanced/experimental).
+
+If you’re embedding Codex via the unified runtime, `createRuntime({ provider: "@openai/codex-sdk", home: "/path" })` sets `CODEX_HOME` for the spawned Codex CLI process. If you’re using `CodexRuntime` directly, set it via `new CodexRuntime({ client: { env: { CODEX_HOME: "..." } } })` (the `env` is passed to the underlying `@openai/codex-sdk` client).
 
 ## Practical tips
 

@@ -26,14 +26,14 @@ test("Codex smoke: run completes", { timeout: 120_000 }, async () => {
     },
     defaultOpts: {
       workspace: { cwd: workspaceDir },
-      permissions: { sandbox: true, write: false, network: false },
+      access: { auto: "low", network: false, webSearch: false },
       model: process.env.CODEX_MODEL,
     },
   });
 
   const session = await runtime.openSession({
     sessionId: `smoke-codex-${Date.now()}`,
-    config: { provider: { modelReasoningEffort: "low" } },
+    config: { reasoningEffort: "low" },
   });
 
   const run = await session.run({

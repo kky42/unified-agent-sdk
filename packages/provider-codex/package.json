@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/provider-codex",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -12,11 +12,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
-    "@unified-agent-sdk/runtime-core": "^0.2.0"
-  },
-  "peerDependencies": {
+    "@unified-agent-sdk/runtime-core": "^0.2.1",
     "@openai/codex-sdk": "*"
   },
   "scripts": {

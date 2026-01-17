@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   query as claudeQuery,
   type Options as ClaudeOptions,
@@ -10,8 +12,9 @@ import {
   type SDKResultSuccess,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
-  PermissionsConfig,
+  AccessConfig,
   ProviderId,
+  ReasoningEffort,
   RunHandle,
   RunRequest,
   RuntimeCapabilities,
@@ -29,7 +32,13 @@ import { AsyncEventStream, normalizeStructuredOutputSchema } from "@unified-agen
 
 export const PROVIDER_CLAUDE_AGENT_SDK = "@anthropic-ai/claude-agent-sdk" as ProviderId;
 
-type UnifiedOwnedClaudeOptionKeys = "cwd" | "additionalDirectories" | "resume" | "abortController" | "model";
+type UnifiedOwnedClaudeOptionKeys =
+  | "cwd"
+  | "additionalDirectories"
+  | "resume"
+  | "abortController"
+  | "model"
+  | "maxThinkingTokens";
 
 export type ClaudeRuntimeConfig = {
   /**
@@ -83,8 +92,9 @@ export class ClaudeRuntime
     return new ClaudeSession({
       sessionId: init.sessionId,
       workspace: init.config?.workspace,
-      permissions: init.config?.permissions,
+      access: init.config?.access,
       model: init.config?.model,
+      reasoningEffort: init.config?.reasoningEffort,
       defaults: this.defaults,
       queryFn: this.queryFn,
       sessionProvider,
@@ -98,7 +108,7 @@ export class ClaudeRuntime
     return new ClaudeSession({
       sessionId: handle.sessionId,
       workspace: undefined,
-      permissions: undefined,
+      access: undefined,
       defaults: this.defaults,
       queryFn: this.queryFn,
       sessionProvider: { resumeSessionId: handle.nativeSessionId } as ClaudeSessionConfig,
@@ -115,26 +125,29 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
 
   private readonly workspace?: WorkspaceConfig;
   private readonly model?: string;
+  private readonly reasoningEffort?: ReasoningEffort;
   private readonly defaults?: ClaudeRuntimeConfig["defaults"];
   private readonly queryFn: typeof claudeQuery;
   private readonly sessionProvider: ClaudeSessionConfig;
-  private readonly permissions?: PermissionsConfig;
+  private readonly access?: AccessConfig;
   private activeRunId: UUID | undefined;
   private readonly abortControllers = new Map<UUID, AbortController>();
 
   constructor(params: {
     sessionId: string;
     workspace?: WorkspaceConfig;
-    permissions?: PermissionsConfig;
+    access?: AccessConfig;
     model?: string;
+    reasoningEffort?: ReasoningEffort;
     defaults?: ClaudeRuntimeConfig["defaults"];
     queryFn: typeof claudeQuery;
     sessionProvider: ClaudeSessionConfig;
   }) {
     this.sessionId = params.sessionId;
     this.workspace = params.workspace;
-    this.permissions = params.permissions;
+    this.access = params.access;
     this.model = params.model;
+    this.reasoningEffort = params.reasoningEffort;
     this.defaults = params.defaults;
     this.queryFn = params.queryFn;
     this.sessionProvider = params.sessionProvider;
@@ -235,12 +248,10 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
 
     const runProvider: Partial<ClaudeSessionConfig> = req.config?.provider ?? {};
 
-    const unifiedPermissionOptions = this.permissions
-      ? mapUnifiedPermissionsToClaude(this.permissions, {
-          cwd: this.workspace?.cwd,
-          additionalDirs: this.workspace?.additionalDirs,
-        })
-      : {};
+    const unifiedAccessOptions = mapUnifiedAccessToClaude(normalizeAccess(this.access), {
+      cwd: this.workspace?.cwd,
+      additionalDirs: this.workspace?.additionalDirs,
+    });
 
     const { schemaForProvider, unwrapStructuredOutput } = normalizeStructuredOutputSchema(req.config?.outputSchema);
 
@@ -248,12 +259,13 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
       ...(this.defaults ?? {}),
       ...(this.sessionProvider ?? {}),
       ...(runProvider ?? {}),
-      ...unifiedPermissionOptions,
+      ...unifiedAccessOptions,
       abortController,
       cwd: this.workspace?.cwd,
       additionalDirectories: this.workspace?.additionalDirs,
       resume: this.sessionProvider.resumeSessionId,
     };
+    options.maxThinkingTokens = mapReasoningEffortToClaudeMaxThinkingTokens(this.reasoningEffort ?? "medium");
     if (this.model) options.model = this.model;
     if (options.settingSources === undefined) options.settingSources = ["user", "project"];
     if (schemaForProvider) {
@@ -415,84 +427,100 @@ function truncate(text: string, maxLen = 500): string {
   return `${t.slice(0, maxLen)}…`;
 }
 
-function normalizePermissions(input: PermissionsConfig): Required<PermissionsConfig> {
-  const yolo = Boolean(input.yolo);
+function normalizeAccess(input: AccessConfig | undefined): Required<AccessConfig> {
   return {
-    yolo,
-    network: yolo ? true : Boolean(input.network),
-    write: yolo ? true : Boolean(input.write),
-    sandbox: yolo ? false : Boolean(input.sandbox),
+    auto: input?.auto ?? "medium",
+    network: input?.network ?? true,
+    webSearch: input?.webSearch ?? true,
   };
 }
 
-function mapUnifiedPermissionsToClaude(
-  input: PermissionsConfig,
+function mapReasoningEffortToClaudeMaxThinkingTokens(effort: ReasoningEffort): number {
+  if (effort === "none") return 0;
+  if (effort === "low") return 4_000;
+  if (effort === "medium") return 8_000;
+  if (effort === "high") return 12_000;
+  return 16_000;
+}
+
+function mapUnifiedAccessToClaude(
+  access: Required<AccessConfig>,
   workspace: { cwd?: string; additionalDirs?: string[] } | undefined,
 ): Partial<ClaudeOptions> {
-  const p = normalizePermissions(input);
-
-  if (p.yolo) {
+  if (access.auto === "high") {
     return {
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      // Avoid conflicting with SDK-level prompt routing; YOLO means no prompts.
+      // Avoid conflicting with SDK-level prompt routing; bypass means no prompts.
       permissionPromptToolName: undefined,
       canUseTool: undefined,
       sandbox: { enabled: false },
     };
   }
 
-  // Non-interactive, no mid-run UX:
-  // - Remove disallowed tools from the model context (`disallowedTools`).
-  // - Provide a deterministic `canUseTool` gate so the SDK never blocks on interactive approvals.
-  //
-  // Note: This is deliberately conservative and coarse. Callers who want richer behavior can use provider config directly.
+  const isMedium = access.auto === "medium";
   const disallowedTools = ["AskUserQuestion"];
-  if (!p.network) disallowedTools.push("WebFetch", "WebSearch");
-  if (!p.write) disallowedTools.push("Write", "Edit", "NotebookEdit", "KillShell");
+  if (!access.network) disallowedTools.push("WebFetch");
+  if (!access.webSearch) disallowedTools.push("WebSearch");
+  if (!isMedium) disallowedTools.push("Write", "Edit", "NotebookEdit", "KillShell");
 
   return {
     permissionPromptToolName: undefined,
     permissionMode: "default",
-    // Explicitly exclude mid-run interactive UX in the unified layer.
     disallowedTools,
-    sandbox: { enabled: p.sandbox, autoAllowBashIfSandboxed: false },
+    sandbox: isMedium
+      ? { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false }
+      : { enabled: false },
     canUseTool: async (toolName, toolInput, meta) => {
-      // Avoid hard-interrupting the whole run on policy denials; return an error tool result to the model
-      // so it can respond gracefully (e.g. "I can't write files with the current permissions.").
       const deny = (message: string) => ({ behavior: "deny" as const, message, interrupt: false as const });
-      if (disallowedTools.includes(toolName)) return deny(`Tool '${toolName}' is disabled by unified permissions.`);
+      if (disallowedTools.includes(toolName)) return deny(`Tool '${toolName}' is disabled by unified access.`);
 
-      // Enforce "sandbox=true => restrict writes to workspace roots" (Codex-like).
-      // Reads can still happen outside the workspace.
-      if (p.sandbox && p.write) {
-        const blockedPath = meta && typeof meta === "object" && "blockedPath" in meta ? (meta as { blockedPath?: unknown }).blockedPath : undefined;
-        const requestedPath =
-          toolInput && typeof toolInput === "object" && !Array.isArray(toolInput) && "file_path" in toolInput
-            ? (toolInput as { file_path?: unknown }).file_path
-            : undefined;
-        const path = typeof blockedPath === "string" && blockedPath ? blockedPath : typeof requestedPath === "string" && requestedPath ? requestedPath : undefined;
-
-        const isWriteTarget = toolName === "Bash" ? isMutatingBashToolInput(toolInput) : isWriteLikeTool(toolName);
-        if (path && isWriteTarget && !isPathWithinWorkspace(path, workspace)) {
-          return deny(`Path '${path}' is outside the session workspace (permissions.sandbox=true).`);
-        }
-      }
-
-      // write=false means: deny mutating tools, but allow read-only Bash commands.
-      if (toolName === "Bash" && !p.write) {
+      if (toolName === "Bash") {
         const command =
           toolInput && typeof toolInput === "object" && !Array.isArray(toolInput) && "command" in toolInput
             ? (toolInput as { command?: unknown }).command
             : undefined;
         if (typeof command !== "string" || !command.trim()) return deny("Bash command is missing.");
-        if (!isReadOnlyBashCommand(command, { allowNetwork: p.network })) {
-          return deny("Bash command denied by unified permissions (write=false).");
+
+        // Prevent sandbox escape attempts in "medium".
+        const dangerouslyDisableSandbox =
+          toolInput && typeof toolInput === "object" && !Array.isArray(toolInput) && "dangerouslyDisableSandbox" in toolInput
+            ? (toolInput as { dangerouslyDisableSandbox?: unknown }).dangerouslyDisableSandbox
+            : undefined;
+        if (isMedium && dangerouslyDisableSandbox === true) {
+          return deny("Bash sandbox escape is disabled in auto=medium.");
+        }
+
+        if (!access.network && isNetworkyBashCommand(command)) {
+          return deny("Bash network access is disabled by unified access (network=false).");
+        }
+
+        if (!isMedium) {
+          // auto=low: deny mutations; allow a conservative read-only set (with network when enabled).
+          if (!isReadOnlyBashCommand(command, { allowNetwork: access.network })) {
+            return deny("Bash command denied by unified access (auto=low).");
+          }
         }
       }
 
-      // Claude Code validates the permission response shape. Some builds expect `updatedInput`
-      // to be present for "allow" decisions, so preserve the original tool input when possible.
+      // Enforce "medium => restrict writes to workspace roots" (best-effort).
+      // Reads can still happen outside the workspace.
+      if (isMedium) {
+        const blockedPath =
+          meta && typeof meta === "object" && "blockedPath" in meta ? (meta as { blockedPath?: unknown }).blockedPath : undefined;
+        const requestedPath =
+          toolInput && typeof toolInput === "object" && !Array.isArray(toolInput) && "file_path" in toolInput
+            ? (toolInput as { file_path?: unknown }).file_path
+            : undefined;
+        const path =
+          typeof blockedPath === "string" && blockedPath ? blockedPath : typeof requestedPath === "string" && requestedPath ? requestedPath : undefined;
+
+        const isWriteTarget = toolName === "Bash" ? isMutatingBashToolInput(toolInput) : isWriteLikeTool(toolName);
+        if (path && isWriteTarget && !isPathWithinWorkspace(path, workspace)) {
+          return deny(`Path '${path}' is outside the session workspace (auto=medium).`);
+        }
+      }
+
       const updatedInput =
         toolInput && typeof toolInput === "object" && !Array.isArray(toolInput) ? (toolInput as Record<string, unknown>) : {};
       return { behavior: "allow" as const, updatedInput };
@@ -513,8 +541,67 @@ function isPathWithinWorkspace(path: string, workspace: { cwd?: string; addition
   }
   if (roots.length === 0) return true;
 
-  // Treat the roots as string-prefix matches. This is best-effort (Claude Code itself performs the authoritative path resolution).
-  return roots.some((r) => path === r || path.startsWith(r.endsWith("/") ? r : `${r}/`));
+  const canonicalTarget = canonicalizePathForWorkspaceCheck(path, { baseDir: workspace.cwd });
+  if (!canonicalTarget) return false;
+
+  // Best-effort normalization (including resolving `..` segments and symlinks when possible).
+  // Claude Code itself performs the authoritative path resolution/sandboxing.
+  return roots.some((root) => {
+    const canonicalRoot = canonicalizePathForWorkspaceCheck(root, { baseDir: workspace.cwd });
+    if (!canonicalRoot) return false;
+    return isPathWithinRoot(canonicalTarget, canonicalRoot);
+  });
+}
+
+function canonicalizePathForWorkspaceCheck(inputPath: string, opts: { baseDir?: string | undefined }): string | undefined {
+  const p = inputPath.trim();
+  if (!p) return undefined;
+  const baseDir = typeof opts.baseDir === "string" && opts.baseDir ? opts.baseDir : undefined;
+  const absPath = path.isAbsolute(p) ? path.resolve(p) : baseDir ? path.resolve(baseDir, p) : undefined;
+  if (!absPath) return undefined;
+  return bestEffortRealpath(absPath);
+}
+
+function bestEffortRealpath(absPath: string): string {
+  let candidate = absPath;
+  const suffix: string[] = [];
+  // Resolve symlinks when the path (or an ancestor) exists, while still supporting writes to new files.
+  for (;;) {
+    try {
+      const real = fs.realpathSync(candidate);
+      return suffix.length ? path.join(real, ...suffix.reverse()) : real;
+    } catch (err) {
+      const code = getFsErrorCode(err);
+      if (code !== "ENOENT" && code !== "ENOTDIR") return absPath;
+      const parent = path.dirname(candidate);
+      if (parent === candidate) return absPath;
+      suffix.push(path.basename(candidate));
+      candidate = parent;
+    }
+  }
+}
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const candidate = normalizePathForComparison(candidatePath);
+  const root = normalizePathForComparison(rootPath);
+
+  const rel = path.relative(root, candidate);
+  if (rel === "") return true;
+  if (rel === "..") return false;
+  if (rel.startsWith(`..${path.sep}`)) return false;
+  if (path.isAbsolute(rel)) return false;
+  return true;
+}
+
+function normalizePathForComparison(p: string): string {
+  // Windows paths are typically case-insensitive.
+  return process.platform === "win32" ? p.toLowerCase() : p;
+}
+
+function getFsErrorCode(err: unknown): string | undefined {
+  return err && typeof err === "object" && "code" in err && typeof (err as { code?: unknown }).code === "string"
+    ? (err as { code: string }).code
+    : undefined;
 }
 
 function isMutatingBashToolInput(toolInput: unknown): boolean {
@@ -550,13 +637,45 @@ function isReadOnlyBashCommand(command: string, opts: { allowNetwork: boolean })
     if (/\b(git\s+(clone|fetch|pull))\b/.test(c)) return false;
   }
 
+  // If network is allowed, permit a narrow set of "fetch to stdout" commands.
+  // This intentionally blocks common file-output flags.
+  if (opts.allowNetwork) {
+    if (/^\s*curl\b/.test(c)) {
+      if (/\s(-o|--output|-O|--remote-name)\b/.test(c)) return false;
+      return true;
+    }
+    if (/^\s*wget\b/.test(c)) {
+      // `wget` writes to disk by default; only allow explicit stdout mode.
+      const stdoutMode = /\s(-q)?-O-\b/.test(c) || /\s--output-document=-\b/.test(c);
+      if (!stdoutMode) return false;
+      if (/\s(--output-document|-O)\b(?!-)/.test(c)) return false;
+      if (/\s(-o|--output-file|-P|--directory-prefix)\b/.test(c)) return false;
+      return true;
+    }
+  }
+
   // Allow a small set of read-only commands (including common search).
   // Note: `git` is allowed only for read-only verbs here.
   if (/^\s*(ls|pwd|whoami|id|uname)\b/.test(c)) return true;
   if (/^\s*(cat|head|tail|wc|stat)\b/.test(c)) return true;
-  if (/^\s*(rg|grep|find)\b/.test(c)) return true;
+  if (/^\s*(rg|grep)\b/.test(c)) return true;
+  if (/^\s*find\b/.test(c)) {
+    // `find` can mutate (e.g. `-delete`) or execute arbitrary programs (e.g. `-exec`),
+    // which would violate the "auto=low" read-only contract.
+    if (/\s-(?:delete|exec(?:dir)?|ok(?:dir)?|fprint0?|fprintf|fls)\b/.test(c)) return false;
+    return true;
+  }
   if (/^\s*git\s+(status|diff|log|show)\b/.test(c)) return true;
 
+  return false;
+}
+
+function isNetworkyBashCommand(command: string): boolean {
+  const c = command.trim();
+  if (!c) return false;
+  // Conservative heuristic: treat these as network-capable. (Better to deny than allow.)
+  if (/\b(curl|wget|nc|ncat|ssh|scp|sftp|rsync|telnet|ping)\b/.test(c)) return true;
+  if (/\b(git\s+(clone|fetch|pull))\b/.test(c)) return true;
   return false;
 }
 
@@ -591,24 +710,8 @@ function mapClaudeMessage(
   };
 } {
   if (msg.type === "tool_progress") {
-    const toolUseId = (msg as any).tool_use_id as string | undefined;
-    const toolName = (msg as any).tool_name as string | undefined;
-    if (state && toolUseId && toolName && !state.toolCallsSeen.has(toolUseId)) {
-      state.toolCallsSeen.add(toolUseId);
-      return {
-        events: [
-          {
-            type: "tool.call",
-            atMs: Date.now(),
-            runId,
-            callId: toolUseId as UUID,
-            toolName,
-            input: null,
-            raw: msg,
-          },
-        ],
-      };
-    }
+    // `tool_progress` is a provider-specific status update; do not treat it as a tool call.
+    // Let it pass through as a provider.event so we don't suppress the real tool_use inputs.
     return { events: [] };
   }
 

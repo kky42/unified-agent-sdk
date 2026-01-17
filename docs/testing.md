@@ -27,14 +27,9 @@ npm test
 
 Smoke tests run the real SDKs/CLIs and make real API calls. Run them locally to verify your environment (auth, CLI, sandboxing).
 
-### Provider peer dependencies
+### Provider dependencies
 
-Provider SDKs are peer dependencies. If you don’t already have them installed, install:
-
-```sh
-npm i -w packages/provider-claude @anthropic-ai/claude-agent-sdk zod@^4
-npm i -w packages/provider-codex  @openai/codex-sdk
-```
+Provider SDKs are regular dependencies now. A repo-root `npm install` will pull them in for the workspace packages.
 
 ```sh
 npm run test:smoke
@@ -70,3 +65,142 @@ node --test test/integration/claude.integration.test.js
 |---|---|---|
 | Codex | `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `webSearchEnabled: false`, `networkAccessEnabled: false`, `skipGitRepoCheck: true` | Set `CODEX_HOME` to a repo-local dir to avoid writing to user home |
 | Claude | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_ERROR_REPORTING=1` | Structured output may take multiple turns (`maxTurns >= 3`) |
+
+## Manual access testing with `uagent exec`
+
+When changing access/sandbox behavior, validate it end-to-end using `uagent exec` (real providers) in a **temporary directory**.
+
+Philosophy:
+- Use a temp workspace to avoid touching real repos.
+- Ask the agent to perform a concrete action **and** to report whether it succeeded and why.
+- Then *you* check the filesystem / output to confirm.
+
+### Setup: temporary workspace roots
+
+Create two temp dirs.
+
+Important Codex note:
+- Codex commonly treats `/tmp` (and macOS temp locations) as writable roots even without `--add-dir`.
+- If you want to verify `--add-dir` / workspace-root write restrictions, use a temp directory **outside** `/tmp` (for example under your project directory) and delete it afterwards.
+
+```sh
+# Recommended (works for both providers; avoids Codex's always-writable `/tmp` roots):
+BASE="$(mktemp -d "$PWD/.cache/uagent-access-test.XXXXXX")"
+WORKSPACE="$BASE/workspace"
+OUTSIDE="$BASE/outside"
+mkdir -p "$WORKSPACE" "$OUTSIDE"
+```
+
+Choose provider + home (examples; adjust paths):
+
+```sh
+# Codex
+PROVIDER=codex
+HOME=/Users/kky/Projects/hiboss/unified-agent-sdk/.profiles/codex/yescode
+
+# Claude
+# PROVIDER=claude
+# HOME=/Users/kky/Projects/hiboss/unified-agent-sdk/.profiles/claude/yescode
+```
+
+Common flags (repeat `--add-dir` as needed):
+
+```sh
+UA="node packages/uagent/bin/uagent.js $PROVIDER exec --workspace \"$WORKSPACE\" --home \"$HOME\""
+```
+
+### Network disabled
+
+Goal: when `--network=false`, the agent should not be able to use network (e.g. `curl`).
+
+```sh
+eval "$UA" --auto medium --network=false \
+  "Run: curl -s https://example.com | head -n 1. Tell me whether the task succeeded. If it failed, explain why."
+```
+
+Expected:
+- It reports failure due to network being disabled by access policy/sandbox.
+
+### Web search disabled
+
+Goal: when `--websearch=false`, the agent should not be able to use the web search tool.
+
+```sh
+eval "$UA" --auto medium --websearch=false \
+  "Use web search to find something recent about \"something in recent\". Tell me whether the task succeeded. If it failed, explain why."
+```
+
+Expected:
+- It reports failure because web search is disabled.
+
+### `auto=low` (read-only)
+
+1) Attempt to write outside workspace (should fail):
+
+```sh
+eval "$UA" --auto low \
+  "Write 'hi' to $OUTSIDE/outside.txt. Tell me whether the task succeeded. If it failed, explain why."
+```
+
+2) Add outside as a writable root, then retry (should still fail in `auto=low`):
+
+```sh
+eval "$UA" --auto low --add-dir "$OUTSIDE" \
+  "Write 'hi' to $OUTSIDE/outside.txt. Tell me whether the task succeeded. If it failed, explain why."
+```
+
+3) Ask it to run a safe read-only command in the workspace (should succeed):
+
+```sh
+printf "hello\n" > "$WORKSPACE/hello.txt"
+eval "$UA" --auto low \
+  "Use a command to print the first line of $WORKSPACE/hello.txt. Tell me whether it succeeded."
+```
+
+Expected:
+- Writes fail (even with `--add-dir`) because `auto=low` is read-only.
+- Read-only commands succeed.
+
+### `auto=medium` (sandboxed writes/commands)
+
+1) Write outside workspace without `--add-dir` (should fail):
+
+```sh
+eval "$UA" --auto medium \
+  "Write 'hi' to $OUTSIDE/outside.txt. Tell me whether the task succeeded. If it failed, explain why."
+```
+
+2) Add outside as writable root and retry (should succeed):
+
+```sh
+eval "$UA" --auto medium --add-dir "$OUTSIDE" \
+  "Write 'hi' to $OUTSIDE/outside.txt. Tell me whether the task succeeded. If it failed, explain why."
+```
+
+3) Run a command that writes inside the workspace (should succeed):
+
+```sh
+eval "$UA" --auto medium \
+  "Use a command to create $WORKSPACE/in_workspace.txt with content OK. Tell me whether it succeeded."
+```
+
+Expected:
+- Writes are restricted to `--workspace` + `--add-dir` roots.
+
+### `auto=high` (unrestricted)
+
+Goal: verify it can write outside workspace even without `--add-dir`.
+
+```sh
+eval "$UA" --auto high \
+  "Write 'hi' to $OUTSIDE/high_outside.txt. Tell me whether the task succeeded. If it failed, explain why."
+```
+
+Expected:
+- Succeeds (unrestricted). Use with caution.
+
+### Cleanup
+
+```sh
+rm -rf "$BASE"
+```

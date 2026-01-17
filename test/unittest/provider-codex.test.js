@@ -49,7 +49,6 @@ class CapturingCodex {
 
 test("CodexSession.cancel(runId) aborts the run and reports cancelled", async () => {
   const runtime = new CodexRuntime({
-    defaults: { modelReasoningEffort: "low" },
     codex: new FakeCodex(async function* (_thread, _input, turnOptions) {
       const signal = turnOptions.signal;
       yield { type: "thread.started", thread_id: "t1" };
@@ -78,7 +77,6 @@ test("CodexSession.cancel(runId) aborts the run and reports cancelled", async ()
 
 test("Codex adapter resolves run.result even when events are not consumed", async () => {
   const runtime = new CodexRuntime({
-    defaults: { modelReasoningEffort: "low" },
     codex: new FakeCodex(async function* (thread) {
       thread._id = "t_result_only";
       yield { type: "thread.started", thread_id: "t_result_only" };
@@ -98,7 +96,6 @@ test("Codex adapter resolves run.result even when events are not consumed", asyn
 
 test("CodexSession.run rejects concurrent runs (SessionBusyError)", async () => {
   const runtime = new CodexRuntime({
-    defaults: { modelReasoningEffort: "low" },
     codex: new FakeCodex(async function* (thread, _input, turnOptions) {
       const signal = turnOptions.signal;
       thread._id = "t_busy";
@@ -127,7 +124,6 @@ test("CodexSession.run rejects concurrent runs (SessionBusyError)", async () => 
 
 test("Codex adapter best-effort parses structured output when outputSchema is set", async () => {
   const runtime = new CodexRuntime({
-    defaults: { modelReasoningEffort: "low" },
     codex: new FakeCodex(async function* (thread, _input, _turnOptions) {
       thread._id = "t2";
       yield { type: "thread.started", thread_id: "t2" };
@@ -155,7 +151,6 @@ test("Codex adapter best-effort parses structured output when outputSchema is se
 
 test("Codex adapter wraps non-object outputSchema roots and unwraps structuredOutput", async () => {
   const runtime = new CodexRuntime({
-    defaults: { modelReasoningEffort: "low" },
     codex: new FakeCodex(async function* (thread, _input, turnOptions) {
       assert.equal(typeof turnOptions.outputSchema, "object");
       assert.ok(turnOptions.outputSchema && turnOptions.outputSchema.type === "object", "expected wrapped outputSchema.type=object");
@@ -186,7 +181,6 @@ test("Codex adapter wraps non-object outputSchema roots and unwraps structuredOu
 
 test("Codex adapter maps reasoning items to assistant.reasoning.message", async () => {
   const runtime = new CodexRuntime({
-    defaults: { modelReasoningEffort: "low" },
     codex: new FakeCodex(async function* (thread) {
       thread._id = "t3";
       yield { type: "thread.started", thread_id: "t3" };
@@ -212,31 +206,68 @@ test("Codex adapter maps reasoning items to assistant.reasoning.message", async 
   assert.deepEqual(reasoningMessages, ["I will inspect the repo and summarize issues."]);
 });
 
-test("Codex adapter maps unified SessionConfig.permissions into ThreadOptions (2x2x2 + yolo)", async (t) => {
+test("Codex adapter injects image placeholders to preserve multimodal part ordering", async () => {
+  const runtime = new CodexRuntime({
+    codex: new FakeCodex(async function* (thread, input) {
+      assert.ok(Array.isArray(input), "expected structured (multimodal) input array");
+      assert.deepEqual(input, [
+        {
+          type: "text",
+          text: "t1.before\n\n[Image #1]\n\nt1.after\n\nt2\n\n[Image #2]",
+        },
+        { type: "local_image", path: "C:\\imgs\\first.png" },
+        { type: "local_image", path: "/tmp/second.jpg" },
+      ]);
+
+      thread._id = "t_mm";
+      yield { type: "thread.started", thread_id: "t_mm" };
+      yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } };
+    }),
+  });
+
+  const session = await runtime.openSession({ sessionId: "s_mm", config: { workspace: { cwd: process.cwd() } } });
+  const run = await session.run({
+    input: [
+      {
+        parts: [
+          { type: "text", text: "t1.before" },
+          { type: "local_image", path: "C:\\imgs\\first.png" },
+          { type: "text", text: "t1.after" },
+        ],
+      },
+      { parts: [{ type: "text", text: "t2" }, { type: "local_image", path: "/tmp/second.jpg" }] },
+    ],
+  });
+
+  for await (const _ev of run.events) {
+    // drain
+  }
+});
+
+test("Codex adapter maps unified SessionConfig.access into ThreadOptions (auto x network x webSearch + default)", async (t) => {
   const makeEvents = async function* (thread) {
     thread._id = "t_perm";
     yield { type: "thread.started", thread_id: "t_perm" };
     yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } };
   };
 
-  const cases = [];
-  for (const network of [false, true]) {
-    for (const sandbox of [false, true]) {
-      for (const write of [false, true]) {
-        cases.push({ name: `network=${network} sandbox=${sandbox} write=${write}`, permissions: { network, sandbox, write } });
+  const cases = [{ name: "default", access: undefined, expected: { sandboxMode: "workspace-write", network: true, webSearch: true } }];
+  for (const auto of ["low", "medium", "high"]) {
+    for (const network of [false, true]) {
+      for (const webSearch of [false, true]) {
+        cases.push({ name: `auto=${auto} network=${network} webSearch=${webSearch}`, access: { auto, network, webSearch } });
       }
     }
   }
-  cases.push({ name: "yolo", permissions: { yolo: true } });
 
   for (const c of cases) {
     await t.test(c.name, async () => {
       const codex = new CapturingCodex(makeEvents);
-      const runtime = new CodexRuntime({ codex, defaults: { modelReasoningEffort: "low" } });
+      const runtime = new CodexRuntime({ codex });
 
       const session = await runtime.openSession({
         sessionId: "s_perm",
-        config: { workspace: { cwd: process.cwd() }, permissions: c.permissions },
+        config: { workspace: { cwd: process.cwd() }, ...(c.access ? { access: c.access } : {}) },
       });
       const run = await session.run({ input: { parts: [{ type: "text", text: "hi" }] } });
       for await (const _ev of run.events) {
@@ -246,23 +277,45 @@ test("Codex adapter maps unified SessionConfig.permissions into ThreadOptions (2
       assert.ok(codex.lastThreadOptions, "expected thread options to be captured");
       assert.equal(codex.lastThreadOptions.approvalPolicy, "never");
 
-      if (c.permissions.yolo) {
-        assert.equal(codex.lastThreadOptions.sandboxMode, "danger-full-access");
-        assert.equal(codex.lastThreadOptions.networkAccessEnabled, true);
-        assert.equal(codex.lastThreadOptions.webSearchEnabled, true);
-        return;
-      }
+      const expected =
+        c.expected ??
+        ({
+          sandboxMode: c.access.auto === "low" ? "read-only" : c.access.auto === "medium" ? "workspace-write" : "danger-full-access",
+          network: c.access.auto === "high" ? true : Boolean(c.access.network),
+          webSearch: c.access.auto === "high" ? true : Boolean(c.access.webSearch),
+        });
 
-      const expectedNetwork = Boolean(c.permissions.network);
-      const expectedWrite = Boolean(c.permissions.write);
-      const expectedSandbox = Boolean(c.permissions.sandbox);
+      assert.equal(codex.lastThreadOptions.sandboxMode, expected.sandboxMode);
+      assert.equal(codex.lastThreadOptions.networkAccessEnabled, expected.network);
+      assert.equal(codex.lastThreadOptions.webSearchEnabled, expected.webSearch);
+      assert.equal(codex.lastThreadOptions.modelReasoningEffort, "medium");
+    });
+  }
+});
 
-      assert.equal(
-        codex.lastThreadOptions.sandboxMode,
-        !expectedWrite ? "read-only" : expectedSandbox ? "workspace-write" : "danger-full-access",
-      );
-      assert.equal(codex.lastThreadOptions.networkAccessEnabled, expectedNetwork);
-      assert.equal(codex.lastThreadOptions.webSearchEnabled, expectedNetwork);
+test("Codex adapter maps unified SessionConfig.reasoningEffort into ThreadOptions.modelReasoningEffort", async (t) => {
+  const makeEvents = async function* () {};
+  const cases = [
+    { name: "default", reasoningEffort: undefined, expected: "medium" },
+    { name: "none", reasoningEffort: "none", expected: "minimal" },
+    { name: "low", reasoningEffort: "low", expected: "low" },
+    { name: "medium", reasoningEffort: "medium", expected: "medium" },
+    { name: "high", reasoningEffort: "high", expected: "high" },
+    { name: "xhigh", reasoningEffort: "xhigh", expected: "xhigh" },
+  ];
+
+  for (const c of cases) {
+    await t.test(c.name, async () => {
+      const codex = new CapturingCodex(makeEvents);
+      const runtime = new CodexRuntime({ codex });
+
+      await runtime.openSession({
+        sessionId: `s_reasoning_${c.name}`,
+        config: { workspace: { cwd: process.cwd() }, ...(c.reasoningEffort ? { reasoningEffort: c.reasoningEffort } : {}) },
+      });
+
+      assert.ok(codex.lastThreadOptions, "expected thread options to be captured");
+      assert.equal(codex.lastThreadOptions.modelReasoningEffort, c.expected);
     });
   }
 });
