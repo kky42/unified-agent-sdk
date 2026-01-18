@@ -7,7 +7,7 @@
   },
   "type": "module",
   "bin": {
-    "uagent": "./bin/uagent.js"
+    "uagent": "bin/uagent.js"
   },
   "files": [
     "bin",
