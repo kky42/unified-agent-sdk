@@ -30,3 +30,216 @@ For debugging and forward-compatibility, adapters can emit `provider.event` with
 
 - `run.events` is single-consumer (consume it promptly if you want complete streaming output/telemetry).
 - `run.result` settles even if you never iterate `run.events`.
+
+---
+
+## Event mapping by provider
+
+This section summarizes how the `@unified-agent-sdk/runtime-core` event model maps to:
+- `@openai/codex-sdk` (Codex)
+- `@anthropic-ai/claude-agent-sdk` (Claude Code / Claude Agent SDK)
+
+### Support levels
+
+- ✅ strong/explicit support (reliable)
+- 🟡 best-effort / derived (may be incomplete)
+- ❌ not available from that source without extra integration
+
+### High-level event mapping
+
+| Unified event | Codex SDK (source) | Claude Agent SDK (source) | Notes |
+|---|---|---|---|
+| `run.started` | Emitted immediately when `run()` starts | Emitted immediately when `run()` starts | For provider-native lifecycle, listen for `provider.event` |
+| `assistant.delta` | `item.updated` / `item.started` where `item.type="agent_message"` | `stream_event` with `content_block_delta` + `text_delta` | Both stream final text ✅ |
+| `assistant.message` | `item.completed` where `item.type="agent_message"` | `assistant` message, extract text blocks | Both support ✅ |
+| `assistant.reasoning.delta` / `.message` | `item.updated` / `item.completed` where `item.type="reasoning"` | Thinking-style deltas (provider-specific) | Best-effort 🟡 |
+| `tool.call` | `item.started` for `command_execution`, `web_search`, `mcp_tool_call` | `tool_use` blocks in assistant messages | Both support ✅ |
+| `tool.result` | `item.completed` for tool items | `tool_result` blocks in subsequent messages | Both support ✅ |
+| `run.completed` | `turn.completed` / `turn.failed` | `result` message | Both support ✅ |
+| `provider.event` | Any unmapped `ThreadEvent` | Any unmapped `SDKMessage` | Use for debugging |
+| `usage` | `turn.completed.usage` | `result.usage` | Unified: `input_tokens`, `cache_read_tokens`, `cache_write_tokens`, `output_tokens` |
+
+---
+
+## Native tools by provider
+
+The SDK emits unified `tool.call` and `tool.result` events. The `toolName` field contains either the provider's native tool name (Claude) or a mapped name (Codex).
+
+### Claude (`@anthropic-ai/claude-agent-sdk`)
+
+Claude tools pass through with their native names. Some tools have different availability depending on the execution context.
+
+#### All Claude native tools
+
+| Native Tool | Unified `toolName` | Description | SDK Availability |
+|---|---|---|---|
+| Read | Read | Read files from filesystem | ✅ Available |
+| Write | Write | Create or overwrite files | ✅ Available |
+| Edit | Edit | String replacements in files | ✅ Available |
+| Glob | Glob | File pattern matching | ✅ Available |
+| Grep | Grep | Content search with regex | ✅ Available |
+| Bash | Bash | Shell command execution | ✅ Available |
+| WebSearch | WebSearch | Web search | ✅ Available |
+| WebFetch | WebFetch | Fetch and process web content | ✅ Available |
+| Task | Task | Launch sub-agents | ✅ Available |
+| TaskOutput | TaskOutput | Check background task output | ✅ Available |
+| KillShell | KillShell | Terminate background shells | ✅ Available |
+| TodoWrite | TodoWrite | Task list management | ✅ Available |
+| NotebookEdit | NotebookEdit | Edit Jupyter notebooks | ✅ Available |
+| EnterPlanMode | EnterPlanMode | Enter planning mode | ✅ Available |
+| ExitPlanMode | ExitPlanMode | Exit planning mode | ✅ Available |
+| AskUserQuestion | AskUserQuestion | Prompt user for input | ❌ Disabled * |
+| Skill | Skill | Execute specialized skills | ✅ Available |
+
+\* **`AskUserQuestion` is disabled in the unified SDK** because the SDK is designed for non-interactive/programmatic usage where there's no user to respond. This tool IS available in Claude CLI interactive mode.
+
+### Codex (`@openai/codex-sdk`)
+
+Codex has three layers of tool abstraction:
+1. **Internal tools** - what the model uses internally (`shell`, `apply_patch`, `update_plan`, `view_image`, `web.run`)
+2. **SDK item types** - what the SDK emits in events (`command_execution`, `file_change`, `web_search`, etc.)
+3. **`functions.*` namespace** - how Codex presents callable tools to users
+
+#### SDK item types → Unified `tool.call` events
+
+| SDK Item Type | Unified `toolName` | Internal Tool | Description |
+|---|---|---|---|
+| `command_execution` | Bash | `shell` | Shell command execution |
+| `file_change` | WorkspacePatchApplied | `apply_patch` | File patches applied by agent |
+| `web_search` | WebSearch | `web.run` | Web search (internal browsing API) |
+| `mcp_tool_call` | `{server}.{tool}` | MCP | MCP tool calls (dynamic name) |
+
+#### `functions.*` tools (user-facing)
+
+When users ask Codex to list its tools, it reports these as `functions.*`:
+
+| User-Facing Tool | Maps To | Emitted as `tool.call` |
+|---|---|---|
+| `functions.exec_command` | `command_execution` | ✅ Yes → `Bash` |
+| `functions.apply_patch` | `file_change` | ✅ Yes → `WorkspacePatchApplied` |
+| `functions.write_stdin` | (TTY interaction) | ❌ No * |
+| `functions.update_plan` | `todo_list` | ❌ No † |
+| `functions.list_mcp_resources` | `mcp_tool_call` | ✅ Yes → `codex.list_mcp_resources` |
+| `functions.list_mcp_resource_templates` | `mcp_tool_call` | ✅ Yes → `codex.list_mcp_resource_templates` |
+| `functions.read_mcp_resource` | `mcp_tool_call` | ✅ Yes → `{server}.read_mcp_resource` |
+| `functions.spawn_agent` | (sub-agent management) | ❌ No * |
+| `functions.send_input` | (sub-agent management) | ❌ No * |
+| `functions.wait` | (sub-agent management) | ❌ No * |
+| `functions.close_agent` | (sub-agent management) | ❌ No * |
+| `multi_tool_use.parallel` | (parallel execution) | ❌ No * |
+
+\* **Cannot be mapped**: The Codex SDK does not emit item types for these operations.
+They are internal orchestration mechanisms handled behind the scenes.
+
+† **Not mapped (different pattern)**: See [Why `todo_list` is not mapped](#why-todo_list-is-not-mapped) below.
+
+#### Internal tools (not in `functions.*` namespace)
+
+These internal tools are used by the model but not exposed as `functions.*`:
+
+| Internal Tool | Purpose | SDK Visibility |
+|---|---|---|
+| `shell` | Run shell commands | Emitted as `command_execution` |
+| `apply_patch` | Modify files via patches | Emitted as `file_change` |
+| `update_plan` | Manage TODO/plan items | Emitted as `todo_list` (not as `tool.call`) |
+| `view_image` | Attach local images for visual context | Input only (not emitted) |
+| `web.run` | Internal browsing/search API | Emitted as `web_search` |
+
+#### Codex SDK limitations
+
+The Codex SDK (`@openai/codex-sdk`) only emits these `ThreadItem` types:
+
+```typescript
+type ThreadItem =
+  | AgentMessageItem      // type: "agent_message"
+  | ReasoningItem         // type: "reasoning"
+  | CommandExecutionItem  // type: "command_execution"
+  | FileChangeItem        // type: "file_change"
+  | McpToolCallItem       // type: "mcp_tool_call"
+  | WebSearchItem         // type: "web_search"
+  | TodoListItem          // type: "todo_list"
+  | ErrorItem;            // type: "error"
+```
+
+The following operations have **no corresponding item types** and cannot be mapped to unified `tool.call` events:
+
+| Operation | Why Not Mappable |
+|---|---|
+| Sub-agent management (`spawn_agent`, `send_input`, `wait`, `close_agent`) | Internal orchestration, no SDK events emitted |
+| TTY interaction (`write_stdin`) | Handled at CLI process level (stdin/stdout) |
+| Parallel execution (`multi_tool_use.parallel`) | Orchestration wrapper, not a discrete tool call |
+
+If OpenAI adds new item types for these operations in the future, the unified SDK can be updated to map them.
+
+#### Why `todo_list` is not mapped
+
+Unlike other Codex item types, `todo_list` follows a **continuous state pattern** rather than a **discrete call/result pattern**:
+
+| Aspect | Regular Tools (`command_execution`, etc.) | `todo_list` |
+|---|---|---|
+| Pattern | Request → Response | Continuous state updates |
+| Has `status` field | ✅ `"in_progress" \| "completed" \| "failed"` | ❌ No |
+| Event sequence | 1 `item.started` → 1 `item.completed` | 1 `item.started` → N `item.updated` → 1 `item.completed` |
+| Clear input/output | ✅ Yes | ❌ Just current state |
+
+```typescript
+// Regular tool - has status, clear lifecycle
+type CommandExecutionItem = {
+  id: string;
+  type: "command_execution";
+  command: string;           // input
+  aggregated_output: string; // output
+  status: CommandExecutionStatus;  // lifecycle
+};
+
+// todo_list - continuous state, no status
+type TodoListItem = {
+  id: string;
+  type: "todo_list";
+  items: TodoItem[];  // just current state, updated multiple times
+};
+```
+
+The `tool.call` / `tool.result` pattern expects:
+1. A discrete call with known input
+2. A single result with output
+
+But `todo_list` emits multiple `item.updated` events as the plan evolves during a turn. Mapping this would either:
+- Emit multiple `tool.call` events with the same ID (confusing)
+- Only emit the final state (loses intermediate updates)
+
+**Current behavior:** `todo_list` events are emitted as `provider.event`, preserving full fidelity for consumers who need plan tracking.
+
+---
+
+## Reasoning & Plan events
+
+These are important in modern agent UX:
+
+### Reasoning/thinking
+
+**Part of the unified event contract** via `assistant.reasoning.delta` and `assistant.reasoning.message`.
+
+| Provider | Source | Reliability |
+|---|---|---|
+| Codex | `item.type="reasoning"` | ✅ Reliable when model reasons |
+| Claude | Thinking-style content blocks | 🟡 Varies by model/settings |
+
+Consumers should treat reasoning events as optional (check `capabilities().reasoningEvents`).
+
+### Plan/todo updates
+
+**Not yet first-class** in the unified contract:
+
+| Provider | Source | Current handling |
+|---|---|---|
+| Codex | `todo_list` item type | Emitted as `provider.event` |
+| Claude | Model/tooling-dependent (`TodoWrite` tool) | Emitted as `tool.call` |
+
+---
+
+## Future direction
+
+Potential extensions to the unified event model:
+- First-class representation for plan/todo updates (so TUIs can render these without relying on `provider.event`)
+- Additional tool mapping as providers add new item types
