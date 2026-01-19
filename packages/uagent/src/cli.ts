@@ -13,6 +13,7 @@ type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
 const ANSI = {
   green: "\u001b[32m",
   orange: "\u001b[38;5;208m",
+  dim: "\u001b[2m",
   reset: "\u001b[0m",
 };
 
@@ -374,7 +375,7 @@ async function runInteractiveTurn(
   session: UnifiedSession,
   prompt: string,
   opts: { trace?: boolean; traceRaw?: boolean },
-): Promise<{ status: string }> {
+): Promise<{ status: string; lastErrorMessage?: string }> {
   const handle = await session.run({ input: turnInput(prompt) });
 
   let atLineStart = true;
@@ -383,7 +384,9 @@ async function runInteractiveTurn(
   let printedAnswer = false;
   let lastToolName: string | null = null;
   let block: "tools" | "reasoning" | "answer" | null = null;
-  let printedReasoningMarker = false;
+  let reasoningOpen = false;
+  let reasoningHasDelta = false;
+  let lastErrorMessage: string | undefined;
   const toolNameByCallId = new Map<string, string>();
 
   const write = (text: string) => {
@@ -405,6 +408,8 @@ async function runInteractiveTurn(
       if (!atLineStart) write("\n");
       block = "tools";
       lastToolName = null;
+      reasoningOpen = false;
+      reasoningHasDelta = false;
     }
   };
 
@@ -423,10 +428,19 @@ async function runInteractiveTurn(
     lastToolName = toolName;
   };
 
-  const printReasoningMarker = () => {
+  const beginReasoningBlock = () => {
+    if (reasoningOpen) return;
     ensureAgentHeader();
     if (!atLineStart) write("\n");
+    block = "reasoning";
+    lastToolName = null;
+    reasoningOpen = true;
     write(`${ANSI.orange}Reasoning${ANSI.reset}\n`);
+  };
+
+  const writeReasoningText = (text: string) => {
+    if (!text) return;
+    write(`${ANSI.dim}${text}${ANSI.reset}`);
   };
 
   const writeAssistantText = (nextText: string) => {
@@ -440,6 +454,8 @@ async function runInteractiveTurn(
     }
     block = "answer";
     lastToolName = null;
+    reasoningOpen = false;
+    reasoningHasDelta = false;
     printedAnswer = true;
     if (!currentAnswerText) {
       write(nextText);
@@ -487,10 +503,15 @@ async function runInteractiveTurn(
       const detail = detailParts.length ? ` ${detailParts.join(" ")}` : "";
       process.stderr.write(`[uagent] ${event.type}${detail}\n`);
 
-      if (opts.traceRaw && event.type === "provider.event") {
-        process.stderr.write(
-          `${inspect(event.payload, { depth: 8, maxArrayLength: 50, maxStringLength: 2000, compact: false })}\n`,
-        );
+      if (opts.traceRaw) {
+        const rawPayload = event.type === "provider.event" ? event.payload : event.raw;
+        if (rawPayload !== undefined) {
+          const rawLabel = event.type === "provider.event" ? "provider.event" : `${event.type}.raw`;
+          process.stderr.write(`[uagent] ${rawLabel}\n`);
+          process.stderr.write(
+            `${inspect(rawPayload, { depth: 8, maxArrayLength: 50, maxStringLength: 2000, compact: false })}\n`,
+          );
+        }
       }
     }
 
@@ -521,6 +542,8 @@ async function runInteractiveTurn(
       }
       block = "answer";
       lastToolName = null;
+      reasoningOpen = false;
+      reasoningHasDelta = false;
       write(event.textDelta);
       currentAnswerText += event.textDelta;
       printedAnswer = true;
@@ -528,15 +551,9 @@ async function runInteractiveTurn(
     }
 
     if (event.type === "assistant.reasoning.delta") {
-      // Intentionally suppress reasoning text in the TUI.
-      if (!printedReasoningMarker) {
-        const prevBlock = block as "tools" | "reasoning" | "answer" | null;
-        if (prevBlock === "tools" && !atLineStart) write("\n");
-        block = "reasoning";
-        lastToolName = null;
-        printedReasoningMarker = true;
-        printReasoningMarker();
-      }
+      beginReasoningBlock();
+      reasoningHasDelta = true;
+      writeReasoningText(event.textDelta);
       continue;
     }
 
@@ -545,16 +562,16 @@ async function runInteractiveTurn(
       continue;
     }
 
+    if (event.type === "error") {
+      lastErrorMessage = event.message;
+      continue;
+    }
+
     if (event.type === "assistant.reasoning.message") {
-      if (printedReasoningMarker) continue;
-      // Treat each reasoning message as a distinct reasoning block, but do not show its contents.
-      const prevBlock = block as "tools" | "reasoning" | "answer" | null;
-      if (prevBlock === "tools" && !atLineStart) write("\n");
-      block = "reasoning";
-      lastToolName = null;
-      // Only print once per contiguous reasoning phase (similar grouping logic to tools).
-      if (prevBlock !== "reasoning") printReasoningMarker();
-      printedReasoningMarker = true;
+      beginReasoningBlock();
+      if (!reasoningHasDelta) writeReasoningText(event.message.text);
+      reasoningOpen = false;
+      reasoningHasDelta = false;
       continue;
     }
 
@@ -567,7 +584,7 @@ async function runInteractiveTurn(
   const result = await handle.result;
   if ((block as "tools" | "reasoning" | "answer" | null) === "tools" && !atLineStart) write("\n");
   if (!atLineStart) write("\n");
-  return { status: result.status };
+  return { status: result.status, lastErrorMessage };
 }
 
 async function openSession(
@@ -617,14 +634,20 @@ async function main(): Promise<void> {
     );
     try {
       if (parsed.verbose) {
-        const { status } = await runInteractiveTurn(session, parsed.prompt, { trace: parsed.trace, traceRaw: parsed.traceRaw });
+        const { status, lastErrorMessage } = await runInteractiveTurn(session, parsed.prompt, {
+          trace: parsed.trace,
+          traceRaw: parsed.traceRaw,
+        });
         process.exitCode = status === "success" ? 0 : 1;
-        if (status !== "success") process.stdout.write(`(run status: ${status})\n`);
+        if (status !== "success") {
+          process.stdout.write(`(run status: ${status})\n`);
+          if (lastErrorMessage) process.stderr.write(`[uagent] run failed (status=${status}): ${lastErrorMessage}\n`);
+        }
       } else {
         const { status, finalText, lastErrorMessage } = await runOnce(session, parsed.prompt, { captureTools: false });
         process.stdout.write(finalText ? `${finalText}\n` : "");
         process.exitCode = status === "success" ? 0 : 1;
-        if (status !== "success" && !finalText) {
+        if (status !== "success") {
           process.stderr.write(`[uagent] run failed (status=${status})${lastErrorMessage ? `: ${lastErrorMessage}` : ""}\n`);
         }
       }
@@ -656,8 +679,14 @@ async function main(): Promise<void> {
       if (!prompt) continue;
       if (prompt === "/exit" || prompt === "/quit") break;
 
-      const { status } = await runInteractiveTurn(session, prompt, { trace: parsed.trace, traceRaw: parsed.traceRaw });
-      if (status !== "success") process.stdout.write(`(run status: ${status})\n`);
+      const { status, lastErrorMessage } = await runInteractiveTurn(session, prompt, {
+        trace: parsed.trace,
+        traceRaw: parsed.traceRaw,
+      });
+      if (status !== "success") {
+        process.stdout.write(`(run status: ${status})\n`);
+        if (lastErrorMessage) process.stderr.write(`[uagent] run failed (status=${status}): ${lastErrorMessage}\n`);
+      }
     }
   } finally {
     rl.close();

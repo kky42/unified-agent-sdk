@@ -4,10 +4,11 @@ Use `uagent` (in `packages/uagent`) to chat with the SDK in an interactive TUI w
 
 ## Run
 
-Build + start an interactive session (Codex by default):
+Build, then start an interactive session directly from the repo:
 
 ```sh
-npm run interactive
+npm run build
+node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex
 ```
 
 Provider auth is still done via environment variables:
@@ -16,23 +17,23 @@ Provider auth is still done via environment variables:
 
 ## Provider choice
 
-Run specific providers:
+Run a specific provider by switching the first positional arg:
 
 ```sh
-npm run interactive:codex
-npm run interactive:claude
+node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex
+node packages/uagent/bin/uagent.js claude --workspace . --home ~/.claude
 ```
 
 ## Workspace and home
 
-These scripts set:
+Pass the workspace root (defaults to `cwd`) and a provider home directory:
 - `--workspace .` (repo root)
-- `--home .cache/uagent/<provider>` (provider config + session state under the repo)
+- `--home ~/.codex` or `--home ~/.claude` (provider config + session state)
 
 You can also include additional workspace roots (repeat the flag):
 
 ```sh
-node packages/uagent/bin/uagent.js codex --workspace . --add-dir ../shared --add-dir /tmp --auto medium
+node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex --add-dir ../shared --add-dir /tmp --auto medium
 ```
 
 ## Commands
@@ -44,11 +45,11 @@ While running, type `/exit` to quit.
 Allow network (still no writes):
 
 ```sh
-node packages/uagent/bin/uagent.js codex --workspace . --home .cache/uagent/codex --auto low --network
+node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex --auto low --network
 ```
 
 Run with full autonomy (no sandbox / no restrictions):
 
 ```sh
-node packages/uagent/bin/uagent.js claude --workspace . --home .cache/uagent/claude --auto high
+node packages/uagent/bin/uagent.js claude --workspace . --home ~/.claude --auto high
 ```

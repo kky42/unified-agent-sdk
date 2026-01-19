@@ -70,6 +70,8 @@ node --test test/integration/claude.integration.test.js
 
 When changing access/sandbox behavior, validate it end-to-end using `uagent exec` (real providers) in a **temporary directory**.
 
+Note: run the CLI directly from the repo (`node packages/uagent/bin/uagent.js ...`). We no longer use npm `interactive:*` helpers for testing.
+
 Philosophy:
 - Use a temp workspace to avoid touching real repos.
 - Ask the agent to perform a concrete action **and** to report whether it succeeded and why.
