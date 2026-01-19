@@ -68,7 +68,6 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
   }
 
   async openSession(init: {
-    sessionId: string;
     config?: SessionConfig<CodexSessionConfig>;
   }): Promise<UnifiedSession<CodexSessionConfig, never>> {
     const provider: CodexSessionConfig = init.config?.provider ?? {};
@@ -89,15 +88,14 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
     };
     const thread = this.codex.startThread(threadOptions);
     return new CodexSession({
-      sessionId: init.sessionId,
       thread,
       snapshotConfig: { workspace: init.config?.workspace, access, model, reasoningEffort },
     });
   }
 
   async resumeSession(handle: SessionHandle): Promise<UnifiedSession<CodexSessionConfig, never>> {
-    if (!handle.nativeSessionId) {
-      throw new Error("Codex resumeSession requires nativeSessionId (thread id).");
+    if (!handle.sessionId) {
+      throw new Error("Codex resumeSession requires sessionId (thread id).");
     }
     const restored = readUnifiedAgentSdkSessionConfig(handle);
     const access = normalizeAccess(restored?.access);
@@ -113,7 +111,7 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
       modelReasoningEffort: mapReasoningEffortToCodex(reasoningEffort),
     };
 
-    const thread = this.codex.resumeThread(handle.nativeSessionId, threadOptions);
+    const thread = this.codex.resumeThread(handle.sessionId, threadOptions);
     return new CodexSession({
       sessionId: handle.sessionId,
       thread,
@@ -127,8 +125,7 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
 
 class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
   public readonly provider = PROVIDER_CODEX_SDK;
-  public readonly sessionId: string;
-  public nativeSessionId?: string;
+  public sessionId?: string;
 
   private readonly thread: Thread;
   private readonly snapshotConfig: UnifiedAgentSdkSessionConfigSnapshot;
@@ -140,14 +137,13 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
   private readonly seenToolCallIds = new Set<string>();
 
   constructor(params: {
-    sessionId: string;
+    sessionId?: string;
     thread: Thread;
     snapshotConfig: UnifiedAgentSdkSessionConfigSnapshot;
     baseMetadata?: Record<string, unknown>;
   }) {
     this.sessionId = params.sessionId;
     this.thread = params.thread;
-    this.nativeSessionId = this.thread.id ?? undefined;
     this.snapshotConfig = params.snapshotConfig;
     this.baseMetadata = params.baseMetadata;
   }
@@ -272,7 +268,6 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
         atMs: startedAt,
         provider: PROVIDER_CODEX_SDK,
         sessionId: this.sessionId,
-        nativeSessionId: this.nativeSessionId,
         runId,
       };
 
@@ -295,7 +290,7 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
         });
 
         if (ev.type === "thread.started") {
-          this.nativeSessionId = ev.thread_id;
+          this.sessionId = ev.thread_id;
         }
 
         if (ev.type === "turn.completed") {
@@ -642,7 +637,6 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
     return {
       provider: PROVIDER_CODEX_SDK,
       sessionId: this.sessionId,
-      nativeSessionId: this.nativeSessionId,
       metadata: mergeMetadata(this.baseMetadata, encodeUnifiedAgentSdkMetadata(this.snapshotConfig)),
     };
   }

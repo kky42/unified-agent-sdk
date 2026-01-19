@@ -21,7 +21,7 @@ test("ClaudeSession.cancel(runId) aborts the run and reports cancelled", async (
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s1", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const events = [];
@@ -47,7 +47,7 @@ test("Claude adapter mirrors an already-aborted RunConfig.signal into the SDK ab
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_aborted", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const external = new AbortController();
   external.abort("already");
 
@@ -102,7 +102,7 @@ test("Claude adapter removes external abort listener after run completes", async
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_listener_cleanup", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] }, config: { signal } });
 
   for await (const _ev of run.events) {
@@ -133,7 +133,7 @@ test("Claude adapter resolves run.result even when events are not consumed", asy
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_result_only", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const done = await run.result;
@@ -156,7 +156,7 @@ test("ClaudeSession.run rejects concurrent runs (SessionBusyError)", async () =>
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_busy", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run1 = await session.run({ input: { parts: [{ type: "text", text: "first" }] } });
 
   await assert.rejects(
@@ -185,7 +185,7 @@ test("Claude adapter forwards structured_output from SDK result", async () => {
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s2", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   let done;
@@ -217,7 +217,7 @@ test("Claude adapter wraps non-object outputSchema roots and unwraps structuredO
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s2_array", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({
     input: { parts: [{ type: "text", text: "hello" }] },
     config: { outputSchema: { type: "array", items: { type: "integer" } } },
@@ -267,7 +267,7 @@ test("Claude adapter forwards tool_progress as provider.event (not tool.call)", 
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_tool_progress", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const toolCalls = [];
@@ -364,7 +364,6 @@ test("Claude adapter maps unified SessionConfig.access into Claude options (auto
       });
 
       const session = await runtime.openSession({
-        sessionId: "s_perm",
         config: { workspace: { cwd: process.cwd() }, ...(c.access ? { access: c.access } : {}) },
       });
       const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
@@ -410,7 +409,6 @@ test("Claude adapter maps unified SessionConfig.reasoningEffort into options.max
       });
 
       const session = await runtime.openSession({
-        sessionId: `s_reasoning_${c.name}`,
         config: { workspace: { cwd: process.cwd() }, ...(c.reasoningEffort ? { reasoningEffort: c.reasoningEffort } : {}) },
       });
 
@@ -464,7 +462,6 @@ test("Claude adapter denies out-of-workspace writes when auto=medium (but allows
   });
 
   const session = await runtime.openSession({
-    sessionId: "s_sandbox_scope",
     config: { workspace: { cwd: process.cwd() }, access: { auto: "medium", network: true, webSearch: true } },
   });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
@@ -521,7 +518,6 @@ test("Claude adapter denies workspace escapes via symlinks when auto=medium", as
     });
 
     const session = await runtime.openSession({
-      sessionId: "s_symlink_escape",
       config: { workspace: { cwd: workspaceDir }, access: { auto: "medium", network: true, webSearch: true } },
     });
     const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
@@ -548,7 +544,7 @@ test("Claude adapter defaults settingSources to ['user','project'] when omitted"
       })(),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_sources_default", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   for await (const _ev of run.events) {
@@ -574,7 +570,6 @@ test("Claude adapter respects explicit settingSources (including empty array)", 
   });
 
   const session = await runtime.openSession({
-    sessionId: "s_sources_empty",
     config: { workspace: { cwd: process.cwd() }, provider: { settingSources: [] } },
   });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
@@ -618,7 +613,6 @@ test("Claude resumeSession restores unified session config from snapshot metadat
   });
 
   const session = await runtime.openSession({
-    sessionId: "s_resume",
     config: {
       workspace: { cwd: "/repo", additionalDirs: ["/extra"] },
       access: { auto: "low", network: false, webSearch: false },
@@ -633,11 +627,52 @@ test("Claude resumeSession restores unified session config from snapshot metadat
   }
 
   const handle = await session.snapshot();
-  assert.equal(handle.nativeSessionId, "native_1");
+  assert.equal(handle.sessionId, "native_1");
   assert.ok(handle.metadata?.[UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY], "expected unified metadata entry");
 
   const resumed = await runtime.resumeSession(handle);
   const run2 = await resumed.run({ input: { parts: [{ type: "text", text: "hello again" }] } });
+  for await (const _ev of run2.events) {
+    // drain
+  }
+});
+
+test("Claude adapter resumes within the same UnifiedSession across runs", async () => {
+  let call = 0;
+  const runtime = new ClaudeRuntime({
+    query: ({ options }) =>
+      (async function* () {
+        call += 1;
+        if (call === 1) {
+          assert.equal(options.resume, undefined);
+        } else if (call === 2) {
+          assert.equal(options.resume, "native_1");
+        } else {
+          throw new Error(`unexpected query() call count: ${call}`);
+        }
+
+        yield {
+          session_id: "native_1",
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          structured_output: null,
+          total_cost_usd: 0,
+          duration_ms: 1,
+          usage: {},
+        };
+      })(),
+  });
+
+  const session = await runtime.openSession({ config: { workspace: { cwd: "/repo" } } });
+
+  const run1 = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
+  for await (const _ev of run1.events) {
+    // drain
+  }
+  assert.equal(session.sessionId, "native_1");
+
+  const run2 = await session.run({ input: { parts: [{ type: "text", text: "hello again" }] } });
   for await (const _ev of run2.events) {
     // drain
   }

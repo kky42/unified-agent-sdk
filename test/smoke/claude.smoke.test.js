@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntime } from "@unified-agent-sdk/runtime";
-const claudeHome = join(os.homedir(), ".claude");
+const claudeHome = process.env.TEST_CLAUDE_HOME || join(os.homedir(), ".claude");
 
 test("Claude smoke: run completes", { timeout: 120_000 }, async () => {
   const base = await mkdtemp(join(os.tmpdir(), "unified-agent-sdk-claude-smoke-"));
@@ -23,7 +23,6 @@ test("Claude smoke: run completes", { timeout: 120_000 }, async () => {
   });
 
   const session = await runtime.openSession({
-    sessionId: `smoke-claude-${Date.now()}`,
     config: {
       provider: {
         systemPrompt: "You are a concise assistant.",

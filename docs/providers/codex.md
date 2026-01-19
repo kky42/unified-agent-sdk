@@ -47,7 +47,6 @@ In the unified SDK, workspace maps to Codex thread options:
 
 ```ts
 const session = await runtime.openSession({
-  sessionId: "s1",
   config: {
     workspace: { cwd: process.cwd(), additionalDirs: ["/tmp"] },
     model: process.env.CODEX_MODEL,

@@ -49,7 +49,6 @@ const runtime = createRuntime({
 });
 
 const session = await runtime.openSession({
-  sessionId: "demo",
   config: {
     workspace: { cwd: process.cwd() },
     reasoningEffort: "medium",
@@ -156,7 +155,6 @@ Example:
 
 ```ts
 const session = await runtime.openSession({
-  sessionId: "s1",
   config: { reasoningEffort: "low" },
 });
 ```
@@ -167,7 +165,6 @@ Models are provider‑specific but configured the same way:
 
 ```ts
 const session = await runtime.openSession({
-  sessionId: "s1",
   config: { model: "gpt-5.2" },
 });
 ```
@@ -183,10 +180,11 @@ Both map into the same runtime and event model.
 
 ## Learn more
 
-- `docs/config.md` — full config reference
-- `docs/permission.md` — access mapping details
-- `docs/orchestrator.md` — orchestration patterns
-- `docs/testing.md` — smoke/integration tests
+- `docs/guides/config.md` — full config reference
+- `docs/specs/permission.md` — access mapping details
+- `docs/guides/orchestrator.md` — orchestration patterns
+- `docs/specs/testing.md` — smoke/integration tests
+
 **What does `--home` mean?**  
 `--home` points to the provider’s config directory. It lets you keep per‑profile settings
 and auth separate (for example, `.profiles/codex/yescode` or `.profiles/claude/yescode`).

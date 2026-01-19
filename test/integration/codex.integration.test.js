@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntime } from "@unified-agent-sdk/runtime";
-const codexHome = join(os.homedir(), ".codex");
+const codexHome = process.env.TEST_CODEX_HOME || join(os.homedir(), ".codex");
 
 test(
   "Codex integration: run completes",
@@ -26,7 +26,6 @@ test(
 			    });
 
 		    const session = await runtime.openSession({
-		      sessionId: `itest-codex-${Date.now()}`,
 		      config: { reasoningEffort: "low" },
 		    });
 
@@ -75,7 +74,6 @@ test(
 			    });
 
 		    const session = await runtime.openSession({
-		      sessionId: `itest-codex-schema-${Date.now()}`,
 		      config: { reasoningEffort: "low" },
 		    });
 
@@ -154,7 +152,6 @@ test(
 			    });
 
 		    const session = await runtime.openSession({
-		      sessionId: `itest-codex-cancel-${Date.now()}`,
 		      config: { reasoningEffort: "low" },
 		    });
 

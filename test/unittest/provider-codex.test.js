@@ -81,7 +81,7 @@ test("CodexSession.cancel(runId) aborts the run and reports cancelled", async ()
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s1", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const events = [];
@@ -106,7 +106,7 @@ test("Codex adapter mirrors an already-aborted RunConfig.signal into the interna
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_aborted", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const external = new AbortController();
   external.abort("already");
 
@@ -154,7 +154,7 @@ test("Codex adapter removes external abort listener after run completes", async 
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_listener_cleanup", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hi" }] }, config: { signal } });
 
   for await (const _ev of run.events) {
@@ -179,7 +179,7 @@ test("Codex adapter resolves run.result even when events are not consumed", asyn
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_result_only", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const done = await run.result;
@@ -206,7 +206,7 @@ test("Codex adapter maps file_change to tool.call/tool.result (WorkspacePatchApp
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_file_change", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const events = [];
@@ -230,7 +230,7 @@ test("Codex adapter defaults cached_input_tokens to 0 and excludes cache tokens 
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_usage", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   let done;
@@ -262,7 +262,7 @@ test("CodexSession.run rejects concurrent runs (SessionBusyError)", async () => 
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_busy", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run1 = await session.run({ input: { parts: [{ type: "text", text: "first" }] } });
 
   await assert.rejects(
@@ -285,7 +285,7 @@ test("Codex adapter best-effort parses structured output when outputSchema is se
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s2", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({
     input: { parts: [{ type: "text", text: "hello" }] },
     config: { outputSchema: { type: "object" } },
@@ -315,7 +315,7 @@ test("Codex adapter wraps non-object outputSchema roots and unwraps structuredOu
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s2_array", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({
     input: { parts: [{ type: "text", text: "return numbers" }] },
     config: { outputSchema: { type: "array", items: { type: "integer" } } },
@@ -349,7 +349,7 @@ test("Codex adapter maps reasoning items to assistant.reasoning.message", async 
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s3", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
 
   const reasoningMessages = [];
@@ -378,7 +378,7 @@ test("Codex adapter injects image placeholders to preserve multimodal part order
     }),
   });
 
-  const session = await runtime.openSession({ sessionId: "s_mm", config: { workspace: { cwd: process.cwd() } } });
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
   const run = await session.run({
     input: [
       {
@@ -419,7 +419,6 @@ test("Codex adapter maps unified SessionConfig.access into ThreadOptions (auto x
       const runtime = new CodexRuntime({ codex });
 
       const session = await runtime.openSession({
-        sessionId: "s_perm",
         config: { workspace: { cwd: process.cwd() }, ...(c.access ? { access: c.access } : {}) },
       });
       const run = await session.run({ input: { parts: [{ type: "text", text: "hi" }] } });
@@ -463,7 +462,6 @@ test("Codex adapter maps unified SessionConfig.reasoningEffort into ThreadOption
       const runtime = new CodexRuntime({ codex });
 
       await runtime.openSession({
-        sessionId: `s_reasoning_${c.name}`,
         config: { workspace: { cwd: process.cwd() }, ...(c.reasoningEffort ? { reasoningEffort: c.reasoningEffort } : {}) },
       });
 
@@ -484,7 +482,6 @@ test("Codex resumeSession restores unified session config from snapshot metadata
   const runtime = new CodexRuntime({ codex });
 
   const session = await runtime.openSession({
-    sessionId: "s_resume",
     config: {
       workspace: { cwd: "/repo", additionalDirs: ["/extra"] },
       access: { auto: "low", network: false, webSearch: false },
@@ -499,7 +496,7 @@ test("Codex resumeSession restores unified session config from snapshot metadata
   }
 
   const handle = await session.snapshot();
-  assert.equal(handle.nativeSessionId, "t_resume");
+  assert.equal(handle.sessionId, "t_resume");
   assert.ok(handle.metadata?.[UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY], "expected unified metadata entry");
 
   await runtime.resumeSession(handle);

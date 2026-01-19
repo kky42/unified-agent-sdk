@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/runtime",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -16,9 +16,9 @@
     "dist"
   ],
   "dependencies": {
-    "@unified-agent-sdk/runtime-core": "^0.2.3",
-    "@unified-agent-sdk/provider-claude": "^0.2.3",
-    "@unified-agent-sdk/provider-codex": "^0.2.3"
+    "@unified-agent-sdk/runtime-core": "^0.3.0",
+    "@unified-agent-sdk/provider-claude": "^0.3.0",
+    "@unified-agent-sdk/provider-codex": "^0.3.0"
   },
   "scripts": {
     "build": "tsc -b",

@@ -8,7 +8,6 @@ The unified API has two main objects:
 
 ```ts
 const session = await runtime.openSession({
-  sessionId: "s1",
   config: {
     workspace: { cwd: process.cwd() },
     model: "gpt-5",
@@ -16,6 +15,9 @@ const session = await runtime.openSession({
     access: { auto: "medium", network: true, webSearch: true },
   },
 });
+
+// sessionId is undefined until the first run completes
+console.log(session.sessionId); // undefined
 ```
 
 ## Run a turn
@@ -24,6 +26,9 @@ const session = await runtime.openSession({
 const run = await session.run({
   input: { parts: [{ type: "text", text: "Say hello." }] },
 });
+
+// After the run, sessionId is set to the provider's native session id
+console.log(session.sessionId); // "abc-123" (from provider)
 ```
 
 - `run.events` is an `AsyncIterable<RuntimeEvent>` (streaming)
@@ -45,7 +50,11 @@ await runtime.close();
 If the provider supports it (`capabilities().sessionResume === true`), you can snapshot a session handle and resume later:
 
 ```ts
+// Save the session handle (sessionId is the native provider id)
 const handle = await session.snapshot();
+console.log(handle.sessionId); // "abc-123" (Claude's session_id or Codex's thread_id)
+
+// Later, resume the session
 const resumed = await runtime.resumeSession(handle);
 ```
 

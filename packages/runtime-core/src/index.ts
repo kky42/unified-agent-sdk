@@ -172,8 +172,7 @@ export type RuntimeEvent =
       type: "run.started";
       atMs: number;
       provider: ProviderId;
-      sessionId: string;
-      nativeSessionId?: string;
+      sessionId?: string;
       runId: UUID;
       raw?: unknown;
     }
@@ -263,8 +262,7 @@ export interface RunHandle {
 
 export interface SessionHandle {
   provider: ProviderId;
-  sessionId: string;
-  nativeSessionId?: string;
+  sessionId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -294,8 +292,7 @@ export interface UnifiedSession<
   TRunProvider = ProviderConfig
 > {
   provider: ProviderId;
-  sessionId: string;
-  nativeSessionId?: string;
+  sessionId?: string;
 
   capabilities(): Promise<RuntimeCapabilities>;
   status(): Promise<SessionStatus>;
@@ -315,7 +312,6 @@ export interface UnifiedAgentRuntime<
   capabilities(): Promise<RuntimeCapabilities>;
 
   openSession(init: {
-    sessionId: string;
     config?: SessionConfig<TSessionProvider>;
   }): Promise<UnifiedSession<TSessionProvider, TRunProvider>>;
 

@@ -55,13 +55,7 @@ export type ClaudeRuntimeConfig = {
 export type ClaudeSessionConfig = Omit<
   ClaudeOptions,
   UnifiedOwnedClaudeOptionKeys
-> & {
-  /**
-   * If provided, will be mapped to Claude `options.resume` when creating a query.
-   * This is the Claude session id.
-   */
-  resumeSessionId?: string;
-};
+>;
 
 export class ClaudeRuntime
   implements UnifiedAgentRuntime<ClaudeSessionConfig, Partial<ClaudeSessionConfig>>
@@ -88,12 +82,10 @@ export class ClaudeRuntime
   }
 
   async openSession(init: {
-    sessionId: string;
     config?: SessionConfig<ClaudeSessionConfig>;
   }): Promise<UnifiedSession<ClaudeSessionConfig, Partial<ClaudeSessionConfig>>> {
     const sessionProvider: ClaudeSessionConfig = init.config?.provider ?? ({} as ClaudeSessionConfig);
     return new ClaudeSession({
-      sessionId: init.sessionId,
       workspace: init.config?.workspace,
       access: init.config?.access,
       model: init.config?.model,
@@ -105,8 +97,8 @@ export class ClaudeRuntime
   }
 
   async resumeSession(handle: SessionHandle): Promise<UnifiedSession<ClaudeSessionConfig, Partial<ClaudeSessionConfig>>> {
-    if (!handle.nativeSessionId) {
-      throw new Error("Claude resumeSession requires nativeSessionId (Claude session id).");
+    if (!handle.sessionId) {
+      throw new Error("Claude resumeSession requires sessionId (Claude session id).");
     }
     const restored = readUnifiedAgentSdkSessionConfig(handle);
     return new ClaudeSession({
@@ -118,7 +110,7 @@ export class ClaudeRuntime
       defaults: this.defaults,
       queryFn: this.queryFn,
       baseMetadata: handle.metadata,
-      sessionProvider: { resumeSessionId: handle.nativeSessionId } as ClaudeSessionConfig,
+      sessionProvider: {} as ClaudeSessionConfig,
     });
   }
 
@@ -127,8 +119,7 @@ export class ClaudeRuntime
 
 class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<ClaudeSessionConfig>> {
   public readonly provider = PROVIDER_CLAUDE_AGENT_SDK;
-  public readonly sessionId: string;
-  public nativeSessionId?: string;
+  public sessionId?: string;
 
   private readonly workspace?: WorkspaceConfig;
   private readonly model?: string;
@@ -142,7 +133,7 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
   private readonly abortControllers = new Map<UUID, AbortController>();
 
   constructor(params: {
-    sessionId: string;
+    sessionId?: string;
     workspace?: WorkspaceConfig;
     access?: AccessConfig;
     baseMetadata?: Record<string, unknown>;
@@ -161,7 +152,6 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
     this.defaults = params.defaults;
     this.queryFn = params.queryFn;
     this.sessionProvider = params.sessionProvider;
-    this.nativeSessionId = params.sessionProvider.resumeSessionId;
   }
 
   async capabilities(): Promise<RuntimeCapabilities> {
@@ -273,15 +263,21 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
 
     const { schemaForProvider, unwrapStructuredOutput } = normalizeStructuredOutputSchema(req.config?.outputSchema);
 
+    // No special provider fields to strip in the new design.
+    const { ...sessionProviderOptions } = this.sessionProvider ?? {};
+    const { ...runProviderOptions } = runProvider ?? {};
+
     const options: ClaudeOptions = {
       ...(this.defaults ?? {}),
-      ...(this.sessionProvider ?? {}),
-      ...(runProvider ?? {}),
+      ...sessionProviderOptions,
+      ...runProviderOptions,
       ...unifiedAccessOptions,
       abortController,
       cwd: this.workspace?.cwd,
       additionalDirectories: this.workspace?.additionalDirs,
-      resume: this.sessionProvider.resumeSessionId,
+      // Always resume from the latest known Claude session id. Claude may rotate session ids (e.g. after subagents),
+      // so using the initial sessionId can silently drop context.
+      resume: this.sessionId,
     };
     options.maxThinkingTokens = mapReasoningEffortToClaudeMaxThinkingTokens(this.reasoningEffort ?? "medium");
     if (this.model) options.model = this.model;
@@ -296,7 +292,6 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
         atMs: startedAt,
         provider: PROVIDER_CLAUDE_AGENT_SDK,
         sessionId: this.sessionId,
-        nativeSessionId: this.nativeSessionId,
         runId,
       };
 
@@ -304,7 +299,7 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
       const q = this.queryFn({ prompt, options });
 
       for await (const msg of q) {
-        this.nativeSessionId = (msg as { session_id?: string }).session_id ?? this.nativeSessionId;
+        this.sessionId = (msg as { session_id?: string }).session_id ?? this.sessionId;
 
         const mapped = mapClaudeMessage(runId, msg, { toolCallsSeen, toolResultsSeen });
         for (const ev of mapped.events) yield ev;
@@ -423,7 +418,6 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
     return {
       provider: PROVIDER_CLAUDE_AGENT_SDK,
       sessionId: this.sessionId,
-      nativeSessionId: this.nativeSessionId,
       metadata: mergeMetadata(this.baseMetadata, encodeUnifiedAgentSdkMetadata(snapshotConfig)),
     };
   }

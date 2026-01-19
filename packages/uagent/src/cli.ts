@@ -1,6 +1,5 @@
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
-import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { inspect } from "node:util";
 
@@ -601,7 +600,6 @@ async function openSession(
   const additionalDirs =
     addDirs && addDirs.length ? addDirs.map((d) => (isAbsolute(d) ? d : resolve(cwd, d))) : undefined;
   const session = await runtime.openSession({
-    sessionId: randomUUID(),
     config: {
       workspace: { cwd, ...(additionalDirs ? { additionalDirs } : {}) },
       ...(model ? { model } : {}),

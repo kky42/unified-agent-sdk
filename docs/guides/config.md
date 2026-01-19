@@ -25,7 +25,7 @@ When you pass `home` to `createRuntime()` (or `--home` in `uagent`), the directo
 | Reasoning effort (portable) | `SessionConfig.reasoningEffort` (mapped) | `SessionConfig.reasoningEffort` (mapped) |
 | Structured output (`RunConfig.outputSchema`) | `Options.outputFormat = { type: "json_schema", schema }` | forwarded as `turnOptions.outputSchema` |
 | Cancellation (`RunConfig.signal`) | mirrored into Claude `abortController` | mirrored into `turnOptions.signal` |
-| Resume support | `resumeSession(handle)` (reads `handle.nativeSessionId`) | `resumeSession(handle)` (reads `handle.nativeSessionId`) |
+| Resume support | `resumeSession(handle)` (reads `handle.sessionId`) | `resumeSession(handle)` (reads `handle.sessionId`) |
 
 ## Unified config reference (portable)
 
@@ -97,7 +97,8 @@ If you’re looking for an orchestrator-friendly constructor, see [Orchestrator]
 
 ## Snapshot / resume semantics
 
-- `UnifiedSession.snapshot()` returns a `SessionHandle` containing a provider-native session id (`nativeSessionId`) and optional `metadata`.
+- `UnifiedSession.snapshot()` returns a `SessionHandle` containing the provider-native session id (`sessionId`) and optional `metadata`.
+- Note: `sessionId` is `undefined` for new sessions until the first run completes.
 - Provider adapters in this repo include a reserved `SessionHandle.metadata` entry (`UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY`) so `resumeSession(handle)` can restore unified knobs (`workspace`, `access`, `model`, `reasoningEffort`) without losing configuration.
 - If that metadata is missing, `resumeSession(handle)` falls back to runtime defaults (for example `createRuntime({ defaultOpts: ... })`).
 

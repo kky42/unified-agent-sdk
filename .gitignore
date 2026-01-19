@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # MkDocs
 site/
 .venv/
+
+# Claude Code local state
+.claude/

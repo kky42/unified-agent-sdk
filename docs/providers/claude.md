@@ -53,14 +53,12 @@ In the unified SDK, workspace maps to Claude options:
 
 ```ts
 const session = await runtime.openSession({
-  sessionId: "s1",
   config: {
     workspace: { cwd: process.cwd() },
     model: process.env.CLAUDE_MODEL,
     access: { auto: "medium", network: true, webSearch: true },
     provider: {
-      // `ClaudeSessionConfig` is Claude `Options` minus unified-owned keys,
-      // plus `resumeSessionId?` convenience.
+      // `ClaudeSessionConfig` is Claude `Options` minus unified-owned keys.
     },
   },
 });
@@ -98,7 +96,6 @@ const runtime = createRuntime({
 
 // 2) Session-level override
 await runtime.openSession({
-  sessionId: "s1",
   config: { reasoningEffort: "high" }, // maps to maxThinkingTokens=12000
 });
 ```

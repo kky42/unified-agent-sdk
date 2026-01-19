@@ -5,7 +5,7 @@ import { UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY } from "@unified-agent-sd
 import { mergeSessionHandleWithDefaults } from "../../packages/runtime/dist/internal.js";
 
 test("mergeSessionHandleWithDefaults adds unified session config metadata from defaults", () => {
-  const handle = { provider: "@openai/codex-sdk", sessionId: "s1", nativeSessionId: "t1" };
+  const handle = { provider: "@openai/codex-sdk", sessionId: "t1" };
   const merged = mergeSessionHandleWithDefaults(handle, {
     workspace: { cwd: "/repo", additionalDirs: ["/extra"] },
     access: { auto: "low", network: false, webSearch: false },
@@ -29,8 +29,7 @@ test("mergeSessionHandleWithDefaults adds unified session config metadata from d
 test("mergeSessionHandleWithDefaults merges default access with existing access", () => {
   const handle = {
     provider: "@openai/codex-sdk",
-    sessionId: "s2",
-    nativeSessionId: "t2",
+    sessionId: "t2",
     metadata: {
       [UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY]: {
         version: 1,

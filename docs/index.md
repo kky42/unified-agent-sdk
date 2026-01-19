@@ -24,7 +24,6 @@ const runtime = createRuntime({
 });
 
 const session = await runtime.openSession({
-  sessionId: "demo",
   config: {
     workspace: { cwd: process.cwd() },
     reasoningEffort: "medium",

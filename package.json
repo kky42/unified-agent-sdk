@@ -11,8 +11,8 @@
     "clean": "rm -rf packages/*/dist",
     "test": "npm run test:unittest",
     "test:unittest": "npm run build && node --test test/unittest/**/*.test.js",
-    "test:smoke": "npm run build && node --test test/smoke/**/*.test.js",
-    "test:integration": "npm run build && node --test test/integration/**/*.test.js",
+    "test:smoke": "npm run build && { [ -f .env ] && node --env-file=.env --test test/smoke/**/*.test.js || node --test test/smoke/**/*.test.js; }",
+    "test:integration": "npm run build && { [ -f .env ] && node --env-file=.env --test test/integration/**/*.test.js || node --test test/integration/**/*.test.js; }",
     "publish:all": "npm run build && npm publish -w packages/runtime-core --access public && npm publish -w packages/provider-claude --access public && npm publish -w packages/provider-codex --access public && npm publish -w packages/runtime --access public && npm publish -w packages/uagent --access public"
   },
   "devDependencies": {

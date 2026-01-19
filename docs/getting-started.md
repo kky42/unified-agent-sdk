@@ -34,7 +34,6 @@ const runtime = createRuntime({
 });
 
 const session = await runtime.openSession({
-  sessionId: "demo",
   config: {
     workspace: { cwd: process.cwd() },
     access: { auto: "medium", network: true, webSearch: true },

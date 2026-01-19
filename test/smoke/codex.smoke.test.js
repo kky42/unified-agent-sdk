@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntime } from "@unified-agent-sdk/runtime";
-const codexHome = join(os.homedir(), ".codex");
+const codexHome = process.env.TEST_CODEX_HOME || join(os.homedir(), ".codex");
 
 test("Codex smoke: run completes", { timeout: 120_000 }, async () => {
   const base = await mkdtemp(join(os.tmpdir(), "unified-agent-sdk-codex-smoke-"));
@@ -23,7 +23,6 @@ test("Codex smoke: run completes", { timeout: 120_000 }, async () => {
   });
 
   const session = await runtime.openSession({
-    sessionId: `smoke-codex-${Date.now()}`,
     config: { reasoningEffort: "low" },
   });
 

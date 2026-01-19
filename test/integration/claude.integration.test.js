@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntime } from "@unified-agent-sdk/runtime";
-const claudeHome = join(os.homedir(), ".claude");
+const claudeHome = process.env.TEST_CLAUDE_HOME || join(os.homedir(), ".claude");
 
 test(
   "Claude integration: run completes",
@@ -25,9 +25,7 @@ test(
 		      }
 		    });
 
-	    const session = await runtime.openSession({
-	      sessionId: `itest-claude-${Date.now()}`,
-	    });
+	    const session = await runtime.openSession({});
 
     const run = await session.run({
       input: {
@@ -73,9 +71,7 @@ test(
 		      }
 		    });
 
-	    const session = await runtime.openSession({
-	      sessionId: `itest-claude-schema-${Date.now()}`,
-	    });
+	    const session = await runtime.openSession({});
 
     const schema = {
       type: "array",
@@ -159,9 +155,7 @@ test(
 		      }
 		    });
 
-	    const session = await runtime.openSession({
-	      sessionId: `itest-claude-cancel-${Date.now()}`,
-	    });
+	    const session = await runtime.openSession({});
 
     const run = await session.run({
       input: {

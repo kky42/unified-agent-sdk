@@ -135,7 +135,7 @@ function createClaudeRuntime(
 ): UnifiedAgentRuntime<ClaudeSessionConfig, Partial<ClaudeSessionConfig>> {
   const home = init.home;
   const env = mergeIntoOptionalEnv(init.env);
-  // Improve robustness in non-interactive environments (see docs/claude.md).
+  // Improve robustness in non-interactive environments (see docs/providers/claude.md).
   if (
     env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined &&
     !(init.env && Object.prototype.hasOwnProperty.call(init.env, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"))
@@ -195,7 +195,7 @@ function withSessionDefaults<TSessionProvider, TRunProvider>(
     openSession: async (init) => {
       await prepareOnce();
       const merged = mergeSessionConfigWithDefaults(init.config, defaults) as typeof init.config;
-      return runtime.openSession({ sessionId: init.sessionId, config: merged });
+      return runtime.openSession({ config: merged });
     },
     resumeSession: async (handle) => {
       await prepareOnce();

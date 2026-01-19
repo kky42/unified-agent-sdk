@@ -19,7 +19,7 @@ The goal is that an orchestrator can be written once against `UnifiedAgentRuntim
 | Orchestrator factory | `packages/runtime/` | Exports `createRuntime()` and re-exports core + built-in providers |
 | Claude adapter | `packages/provider-claude/` | Wraps `@anthropic-ai/claude-agent-sdk` |
 | Codex adapter | `packages/provider-codex/` | Wraps `@openai/codex-sdk` |
-| Docs | `docs/` | Start with `docs/config.md` and `docs/orchestrator.md` |
+| Docs | `docs/` | Start with `docs/guides/config.md` and `docs/guides/orchestrator.md` |
 | Smoke tests | `test/smoke/` | Real execution (manual / local) |
 | Tests | `test/` | Unit tests + opt-in integration tests |
 
@@ -29,20 +29,20 @@ The goal is that an orchestrator can be written once against `UnifiedAgentRuntim
 - **Unified-owned config stays unified-owned**: workspace and cancellation should not have “two sources of truth” in provider configs.
 - **Provider differences should be explicit in types**: e.g. Codex does not support run-level provider config, so it is typed as `never`.
 - **Prefer readable mapping**: adapters should map upstream events into `RuntimeEvent` in a predictable way.
-- **Docs are part of the API**: if you change config semantics, update `docs/config.md` and `docs/orchestrator.md` in the same PR.
+- **Docs are part of the API**: if you change config semantics, update `docs/guides/config.md` and `docs/guides/orchestrator.md` in the same PR.
 
 ## Read this before making changes
 
 | If you’re working on… | Read |
 |---|---|
 | where to start | `docs/README.md` |
-| config types / semantics | `docs/config.md` |
-| orchestrator wiring | `docs/orchestrator.md` |
-| testing strategy | `docs/testing.md` |
-| Claude-specific behavior | `docs/claude.md` |
-| Codex-specific behavior | `docs/codex.md` |
+| config types / semantics | `docs/guides/config.md` |
+| orchestrator wiring | `docs/guides/orchestrator.md` |
+| testing strategy | `docs/specs/testing.md` |
+| Claude-specific behavior | `docs/providers/claude.md` |
+| Codex-specific behavior | `docs/providers/codex.md` |
 
-Before running manual agent behavior tests (for example `uagent exec` / smoke / integration), read `docs/testing.md` and follow the temporary-workspace approach to avoid damaging the user’s machine.
+Before running manual agent behavior tests (for example `uagent exec` / smoke / integration), read `docs/specs/testing.md` and follow the temporary-workspace approach to avoid damaging the user’s machine.
 
 ## Development commands
 
@@ -59,6 +59,10 @@ Integration tests make real API calls and may incur cost. Run them explicitly vi
 Auth:
 - Codex: `CODEX_API_KEY` (or `OPENAI_API_KEY`) (optional: `CODEX_MODEL`, `CODEX_BASE_URL`)
 - Claude: `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`) (optional: `CLAUDE_MODEL`, `ANTHROPIC_BASE_URL`)
+
+Home directory overrides (to avoid writing to user home):
+- `TEST_CLAUDE_HOME`: Override Claude home directory (default: `~/.claude`)
+- `TEST_CODEX_HOME`: Override Codex home directory (default: `~/.codex`)
 
 Note: running the full integration/smoke suites expects both providers to be configured (missing credentials will fail the run).
 
