@@ -30,12 +30,13 @@ The goal is that an orchestrator can be written once against `UnifiedAgentRuntim
 - **Provider differences should be explicit in types**: e.g. Codex does not support run-level provider config, so it is typed as `never`.
 - **Prefer readable mapping**: adapters should map upstream events into `RuntimeEvent` in a predictable way.
 - **Docs are part of the API**: if you change config semantics, update `docs/guides/config.md` and `docs/guides/orchestrator.md` in the same PR.
+- **Docs are fully published**: every page under `docs/**/*.md` must be included in the MkDocs website nav (`mkdocs.yml`). Keep user docs outside `docs/specs/`, and put implementation/developer docs under `docs/specs/`.
 
 ## Read this before making changes
 
 | If you’re working on… | Read |
 |---|---|
-| where to start | `docs/README.md` |
+| where to start | `docs/docs-map.md` |
 | config types / semantics | `docs/guides/config.md` |
 | orchestrator wiring | `docs/guides/orchestrator.md` |
 | testing strategy | `docs/specs/testing.md` |

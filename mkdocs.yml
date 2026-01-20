@@ -6,7 +6,6 @@ repo_name: kky42/unified-agent-sdk
 edit_uri: edit/main/docs/
 
 docs_dir: docs
-exclude_docs: README.md
 
 theme:
   name: material
@@ -24,13 +23,19 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Use Cases: use-cases.md
+  - Docs Map: docs-map.md
   - Guides:
       - Configuration: guides/config.md
       - Orchestrator: guides/orchestrator.md
-      - Interactive Runner: guides/interactive.md
+      - uagent CLI (Interactive): guides/interactive.md
       - Sessions: guides/sessions.md
       - Events: guides/events.md
       - Structured Output: guides/structured-output.md
+  - Experiments:
+      - Overview: experiments/index.md
+      - Access & Sandboxing: experiments/access.md
+      - In-Flight Reconfiguration: experiments/inflight-reconfiguration.md
   - Providers:
       - Codex: providers/codex.md
       - Claude: providers/claude.md

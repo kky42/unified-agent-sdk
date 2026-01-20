@@ -4,6 +4,25 @@ Build an orchestrator once, run it anywhere.
 
 This repo provides a provider-agnostic runtime/session API so you can swap **Claude** or **Codex** at the composition root without rewriting orchestration logic.
 
+```
+Orchestrator
+   |
+   v
+UnifiedSession.run()  ->  RuntimeEvent stream
+   |
+   +--> provider-codex  -> @openai/codex-sdk
+   |
+   +--> provider-claude -> @anthropic-ai/claude-agent-sdk
+```
+
+## Choose your path
+
+| You are… | Start here | Then |
+|---|---|---|
+| Using the **SDK** in your app | [Getting Started](getting-started.md) | [Guides](guides/config.md), [Use Cases](use-cases.md) |
+| Using **`uagent`** as a daily driver | [uagent CLI (Interactive)](guides/interactive.md) | [Events](guides/events.md), [Access](guides/config.md) |
+| Contributing to this repo | [Specs](specs/testing.md) | Testing + mapping specs |
+
 ## Quick start
 
 Install:
@@ -46,8 +65,7 @@ await runtime.close();
 ```
 
 Next:
-- Start with **Getting Started**
-- Then follow **Guides** for sessions/events/config/structured output
-- Provider-specific details live under **Providers**
-
-Dev + design docs live under **Specs** (mappings, testing, contributor notes).
+- Start with [Getting Started](getting-started.md)
+- Browse [Use Cases](use-cases.md) and [Guides](guides/config.md)
+- Check [Experiments](experiments/index.md) for portability/sandbox findings
+- For implementation details, see [Specs](specs/testing.md)

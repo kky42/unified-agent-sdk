@@ -1,4 +1,19 @@
-# Provider access behavior experiments (Codex + Claude Code)
+# Access & Sandboxing (Experiments)
+
+These experiments validate how unified `SessionConfig.access` maps onto provider sandboxing / tool permissions.
+
+They’re useful if you want to answer questions like:
+- “Will `network=false` really block `curl`?”
+- “Does `auto=low` prevent writes?”
+- “What does ‘outside the workspace’ mean on each provider?”
+
+## Tested on (point-in-time)
+
+| Item | Value |
+|---|---|
+| Test date | 2026-01-20 |
+| Codex | `@openai/codex-sdk@0.80.0` (bundles `codex-cli 0.80.0`) |
+| Claude | `@anthropic-ai/claude-agent-sdk@0.2.7` (bundles Claude Code `2.1.7`) |
 
 ## Results (summary)
 
