@@ -20,7 +20,7 @@ test(
 		      home: codexHome,
 		      defaultOpts: {
 		        workspace: { cwd: workspaceDir },
-		        access: { auto: "low", network: false, webSearch: false },
+		        access: { auto: "low" },
 		        model: process.env.CODEX_MODEL,
 			      },
 			    });
@@ -68,7 +68,7 @@ test(
 		      home: codexHome,
 		      defaultOpts: {
 		        workspace: { cwd: workspaceDir },
-		        access: { auto: "low", network: false, webSearch: false },
+		        access: { auto: "low" },
 		        model: process.env.CODEX_MODEL,
 			      },
 			    });
@@ -146,7 +146,7 @@ test(
 		      home: codexHome,
 		      defaultOpts: {
 		        workspace: { cwd: workspaceDir },
-		        access: { auto: "low", network: false, webSearch: false },
+		        access: { auto: "low" },
 		        model: process.env.CODEX_MODEL,
 			      },
 			    });

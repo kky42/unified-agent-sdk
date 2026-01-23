@@ -77,8 +77,6 @@ Recommended mapping into `@unified-agent-sdk/runtime-core`:
 Permission handling in ACP is interactive by design; for orchestrator usage it should be policy-driven:
 - `access.auto: "high"` → auto-select an allow option if present.
 - `access.auto: "low"` → auto-reject tool calls that look like edits/deletes/moves (best-effort via `ToolKind`).
-- `access.network: false` → auto-reject tool calls that look like fetch/network (best-effort via `ToolKind`).
-- `access.webSearch: false` → auto-reject tool calls that look like search (best-effort via `ToolKind`).
 - Otherwise: expose a provider-specific callback in `SessionConfig.provider` (or a runtime-level hook) to let the orchestrator decide.
 
 Session resume:

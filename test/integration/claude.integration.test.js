@@ -20,7 +20,7 @@ test(
 	      home: claudeHome,
 	      defaultOpts: {
 	        workspace: { cwd: workspaceDir },
-	        access: { auto: "low", network: false, webSearch: false },
+	        access: { auto: "low" },
 	        model: process.env.CLAUDE_MODEL,
 		      }
 		    });
@@ -66,7 +66,7 @@ test(
 	      home: claudeHome,
 	      defaultOpts: {
 	        workspace: { cwd: workspaceDir },
-	        access: { auto: "low", network: false, webSearch: false },
+	        access: { auto: "low" },
 	        model: process.env.CLAUDE_MODEL,
 		      }
 		    });
@@ -150,7 +150,7 @@ test(
 	      home: claudeHome,
 	      defaultOpts: {
 	        workspace: { cwd: workspaceDir },
-	        access: { auto: "low", network: false, webSearch: false },
+	        access: { auto: "low" },
 	        model: process.env.CLAUDE_MODEL,
 		      }
 		    });

@@ -63,7 +63,7 @@ node --test test/integration/claude.integration.test.js
 
 | Provider | Common CI defaults | Notes |
 |---|---|---|
-| Codex | `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `webSearchEnabled: false`, `networkAccessEnabled: false`, `skipGitRepoCheck: true` | Set `CODEX_HOME` to a repo-local dir to avoid writing to user home |
+| Codex | `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true` | Set `CODEX_HOME` to a repo-local dir to avoid writing to user home |
 | Claude | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_ERROR_REPORTING=1` | Structured output may take multiple turns (`maxTurns >= 3`) |
 
 ## Manual access testing with `uagent exec`
@@ -98,11 +98,11 @@ Choose provider + home (examples; adjust paths). The home directory must already
 ```sh
 # Codex
 PROVIDER=codex
-HOME=/Users/kky/Projects/hiboss/unified-agent-sdk/.profiles/codex/yescode
+HOME="$PWD/.profiles/codex/yescode"
 
 # Claude
 # PROVIDER=claude
-# HOME=/Users/kky/Projects/hiboss/unified-agent-sdk/.profiles/claude/yescode
+# HOME="$PWD/.profiles/claude/minimax"
 ```
 
 Common flags (repeat `--add-dir` as needed):
@@ -111,29 +111,26 @@ Common flags (repeat `--add-dir` as needed):
 UA="node packages/uagent/bin/uagent.js $PROVIDER exec --workspace \"$WORKSPACE\" --home \"$HOME\""
 ```
 
-### Network disabled
+### Network + WebSearch
 
-Goal: when `--network=false`, the agent should not be able to use network (e.g. `curl`).
+Unified `access.auto` presets enable the provider WebSearch tool (when supported). Shell networking (for example `curl`) is intentionally conservative in `auto=low`; use `auto=medium` for HTTP/local APIs.
 
-```sh
-eval "$UA" --auto medium --network=false \
-  "Run: curl -s https://example.com | head -n 1. Tell me whether the task succeeded. If it failed, explain why."
-```
-
-Expected:
-- It reports failure due to network being disabled by access policy/sandbox.
-
-### Web search disabled
-
-Goal: when `--websearch=false`, the agent should not be able to use the web search tool.
+To validate **local HTTP** (recommended; no internet dependency), start a local server and ask the agent to `curl` it:
 
 ```sh
-eval "$UA" --auto medium --websearch=false \
-  "Use web search to find something recent about \"something in recent\". Tell me whether the task succeeded. If it failed, explain why."
+PORT=8123
+python3 -m http.server "$PORT" --bind 127.0.0.1
+
+eval "$UA" --auto medium \
+  "Use Bash to run: curl -sI http://127.0.0.1:$PORT/ | head -n 1. Tell me the exact output line."
 ```
 
-Expected:
-- It reports failure because web search is disabled.
+To validate **WebSearch** (real provider call; may incur cost), ask it to use the WebSearch tool:
+
+```sh
+eval "$UA" --auto low \
+  "Use the WebSearch tool to search for: example.com example domain. Tell me whether it succeeded."
+```
 
 ### `auto=low` (read-only)
 
@@ -188,6 +185,8 @@ eval "$UA" --auto medium \
 
 Expected:
 - Writes are restricted to `--workspace` + `--add-dir` roots.
+
+Claude note (sandboxed mode): Claude Code’s sandbox derives write permissions from `Edit(...)` allow rules. This SDK injects `Edit(...)` rules for `--add-dir` automatically in `auto=medium` unless you override settings via `extraArgs.settings`.
 
 ### `auto=high` (unrestricted)
 

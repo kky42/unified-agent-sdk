@@ -673,8 +673,6 @@ function truncate(text: string, maxLen = 500): string {
 function normalizeAccess(input: AccessConfig | undefined): Required<AccessConfig> {
   return {
     auto: input?.auto ?? "medium",
-    network: input?.network ?? true,
-    webSearch: input?.webSearch ?? true,
   };
 }
 
@@ -704,13 +702,9 @@ function readUnifiedAgentSdkSessionConfig(handle: SessionHandle): UnifiedAgentSd
   const access = cfg.access;
   if (access && typeof access === "object" && !Array.isArray(access)) {
     const auto = (access as { auto?: unknown }).auto;
-    const network = (access as { network?: unknown }).network;
-    const webSearch = (access as { webSearch?: unknown }).webSearch;
 
     out.access = {
       ...(auto === "low" || auto === "medium" || auto === "high" ? { auto } : {}),
-      ...(typeof network === "boolean" ? { network } : {}),
-      ...(typeof webSearch === "boolean" ? { webSearch } : {}),
     };
   }
 
@@ -746,14 +740,13 @@ function mapUnifiedAccessToCodex(access: Required<AccessConfig>): Partial<Thread
 
   const sandboxMode: ThreadOptions["sandboxMode"] =
     access.auto === "low" ? "read-only" : access.auto === "medium" ? "workspace-write" : "danger-full-access";
-  const unrestricted = access.auto === "high";
 
   return {
     approvalPolicy,
     sandboxMode,
-    // auto=high means "no restraints": always enable network + web search.
-    networkAccessEnabled: unrestricted ? true : access.network,
-    webSearchEnabled: unrestricted ? true : access.webSearch,
+    // Unified `auto` always enables network + web search; `sandboxMode` is the primary restriction mechanism.
+    networkAccessEnabled: true,
+    webSearchEnabled: true,
   };
 }
 

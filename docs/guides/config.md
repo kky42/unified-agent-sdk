@@ -10,6 +10,8 @@ The orchestrator should generally depend on the unified interfaces (`UnifiedAgen
 
 When you pass `home` to `createRuntime()` (or `--home` in `uagent`), the directory **must already exist**. The runtime does not create it for you. This path is wired to the provider’s config directory (`CODEX_HOME` or `CLAUDE_CONFIG_DIR`).
 
+Always use an **absolute path** for `home` / `--home` / `TEST_*_HOME`: relative paths are resolved by the provider process relative to the session working directory (typically `workspace.cwd`) and can silently point at the wrong profile/auth state.
+
 ## Quick comparison (Claude vs Codex)
 
 | Concern | Claude (`@unified-agent-sdk/provider-claude`) | Codex (`@unified-agent-sdk/provider-codex`) |
@@ -44,13 +46,14 @@ All unified config types are defined in `packages/runtime-core/src/index.ts`.
 
 | Field | Meaning |
 |---|---|
-| `access.auto` | Access preset: `low` (read-only), `medium` (sandboxed writes/commands), `high` (unrestricted) |
-| `access.network` | Allow outbound network access (provider-dependent) |
-| `access.webSearch` | Allow the provider web search tool (provider-dependent) |
+| `access.auto` | Access preset: `low` (read-only + WebSearch; no shell network), `medium` (workspace-write sandbox + WebSearch + network), `high` (unrestricted) |
 
-Defaults (when omitted): `auto="medium"`, `network=true`, `webSearch=true`.
+Defaults (when omitted): `auto="medium"`.
 
-Note: `auto="high"` is intended to mean “no restraints”; provider adapters may treat `network`/`webSearch` as effectively enabled in this mode.
+Notes:
+- Network access (for example `curl` to local HTTP APIs like `http://127.0.0.1:port/...`) is expected in `auto="medium"` and `auto="high"`.
+- This SDK no longer exposes separate “network” / “webSearch” toggles; those capabilities are tied to `access.auto`.
+- Provider sandboxes still differ; `auto="low"` is intentionally conservative (Codex read-only sandboxes may block `curl`, and this repo’s Claude adapter denies network-capable `Bash` commands in `auto="low"` for portability).
 
 ## Unified reasoning config (portable)
 
@@ -75,7 +78,7 @@ Provider mapping:
 | Layer | Unified field | Claude adapter behavior | Codex adapter behavior |
 |---|---|---|---|
 | Runtime defaults | *(provider-specific)* | `ClaudeRuntimeConfig.defaults` applied to every `query()` | `CodexRuntimeConfig.defaults` applied to every thread |
-| Session access | `SessionConfig.access` | maps to Claude permission mode + sandbox options | maps to `ThreadOptions` (sandbox/network/websearch/approval) |
+| Session access | `SessionConfig.access` | maps to Claude permission mode + sandbox options | maps to `ThreadOptions` (sandbox + approval) |
 | Session reasoning | `SessionConfig.reasoningEffort` | sets `Options.maxThinkingTokens` | sets `ThreadOptions.modelReasoningEffort` |
 | Session provider config | `SessionConfig.provider` | merged into Claude `Options` | merged into `ThreadOptions` |
 | Session workspace | `SessionConfig.workspace` | sets `cwd` + `additionalDirectories` | sets `workingDirectory` + `additionalDirectories` *(only if workspace is provided)* |

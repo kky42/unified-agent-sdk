@@ -17,7 +17,7 @@ test("Claude smoke: run completes", { timeout: 120_000 }, async () => {
     home: claudeHome,
     defaultOpts: {
       workspace: { cwd: workspaceDir },
-      access: { auto: "medium", network: false, webSearch: false },
+      access: { auto: "medium" },
       model: process.env.CLAUDE_MODEL,
     },
   });

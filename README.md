@@ -52,7 +52,7 @@ const session = await runtime.openSession({
   config: {
     workspace: { cwd: process.cwd() },
     reasoningEffort: "medium",
-    access: { auto: "medium", network: true, webSearch: true },
+    access: { auto: "medium" },
   },
 });
 
@@ -128,22 +128,15 @@ uagent codex exec \
 
 ### Access (most important for safety)
 
-Access is unified across providers. You control it with `access.auto`, `access.network`, and `access.webSearch`.
+Access is unified across providers. You control it with `access.auto`.
 
 **Presets:**
 
 | `access.auto` | Meaning |
 |---|---|
-| `low` | Read‑only. Blocks edits and dangerous commands. |
-| `medium` | Sandbox writes/commands inside the workspace. |
+| `low` | Read‑only (no edits). WebSearch is available when supported; shell networking (e.g. `curl`) is intentionally conservative. |
+| `medium` | Workspace-write sandbox, with WebSearch + network (including localhost). |
 | `high` | Unrestricted (use with care). |
-
-**Toggles:**
-
-| Field | Effect |
-|---|---|
-| `access.network` | Allow outbound network (Bash/WebFetch). |
-| `access.webSearch` | Allow the provider WebSearch tool. |
 
 ### Reasoning effort (portable)
 

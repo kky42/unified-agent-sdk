@@ -12,7 +12,7 @@ const session = await runtime.openSession({
     workspace: { cwd: process.cwd() },
     model: "gpt-5",
     reasoningEffort: "medium",
-    access: { auto: "medium", network: true, webSearch: true },
+    access: { auto: "medium" },
   },
 });
 

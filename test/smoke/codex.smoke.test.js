@@ -17,7 +17,7 @@ test("Codex smoke: run completes", { timeout: 120_000 }, async () => {
     home: codexHome,
     defaultOpts: {
       workspace: { cwd: workspaceDir },
-      access: { auto: "low", network: false, webSearch: false },
+      access: { auto: "low" },
       model: process.env.CODEX_MODEL,
     },
   });

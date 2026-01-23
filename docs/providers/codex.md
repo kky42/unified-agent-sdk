@@ -30,8 +30,6 @@ const runtime = new CodexRuntime({
     // for orchestrator-friendly, portable access controls.
     sandboxMode: "read-only",
     approvalPolicy: "never",
-    webSearchEnabled: false,
-    networkAccessEnabled: false,
   },
 });
 ```
@@ -51,11 +49,11 @@ const session = await runtime.openSession({
     workspace: { cwd: process.cwd(), additionalDirs: ["/tmp"] },
     model: process.env.CODEX_MODEL,
     reasoningEffort: "medium",
-    access: { auto: "medium", network: true, webSearch: true },
+    access: { auto: "medium" },
     provider: {
       // `CodexSessionConfig` is `ThreadOptions` minus unified-owned keys.
-      // Use this for other Codex knobs; `access` is the preferred place
-      // for sandbox/network/webSearch behavior.
+      // Use this for other Codex knobs; `access.auto` is the preferred place
+      // for portable sandbox behavior.
     },
   },
 });
@@ -98,7 +96,7 @@ When using `@unified-agent-sdk/runtime` / `SessionConfig.access`, the Codex adap
 - `auto="medium"` → `sandboxMode: "workspace-write"`
 - `auto="high"` → `sandboxMode: "danger-full-access"` (**unsafe; unrestricted**)
 
-Note: `auto="high"` is treated as “no restraints”; this SDK enables Codex network + web search regardless of `access.network` / `access.webSearch` in this mode.
+Practical note: on current Codex builds, `sandboxMode="read-only"` may block shell networking (for example `curl` to `http://127.0.0.1:...`). Use `auto="medium"` when you need local HTTP APIs.
 
 Note: some Codex builds treat `"danger-full-access"` as broadly permissive regardless of other toggles (including network).
 
@@ -115,6 +113,8 @@ Controls when Codex pauses for approval before executing a command:
 Codex separates “local network” from “web search”:
 - `networkAccessEnabled` toggles network access for commands in the `workspace-write` sandbox (`sandbox_workspace_write.network_access`).
 - `webSearchEnabled` toggles Codex’s `web_search` tool (`features.web_search_request` / `--search`), which is separate from local network access.
+
+Note: unified-agent-sdk’s `access.auto` presets always enable both network + web search; there is no unified toggle to disable either.
 
 ### Mapping (SDK → Codex CLI/config)
 
@@ -143,6 +143,8 @@ Common approaches:
 - **Experimental override:** `experimental_instructions_file` can be used to point Codex at a replacement instruction file (advanced/experimental).
 
 If you’re embedding Codex via the unified runtime, `createRuntime({ provider: "@openai/codex-sdk", home: "/path" })` sets `CODEX_HOME` for the spawned Codex CLI process. If you’re using `CodexRuntime` directly, set it via `new CodexRuntime({ client: { env: { CODEX_HOME: "..." } } })` (the `env` is passed to the underlying `@openai/codex-sdk` client).
+
+Note: always use an **absolute path** for `CODEX_HOME` / `home` / `--home`. Relative paths are resolved against the process working directory and can silently create/use a different profile directory.
 
 ## Streaming behavior
 
@@ -182,4 +184,5 @@ These events are not yet exposed in the TypeScript SDK types. Monitor [Codex rel
 ## Practical tips
 
 - Prefer setting `CODEX_HOME` to a repo-local directory (e.g. `.cache/codex`) to avoid writing to the user home directory.
-- For predictable CI runs: `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `webSearchEnabled: false`, `networkAccessEnabled: false`, `skipGitRepoCheck: true`.
+- For predictable CI runs: `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true`.
+  - Note: unified-agent-sdk `access.auto` presets always enable `webSearchEnabled` + `networkAccessEnabled`.

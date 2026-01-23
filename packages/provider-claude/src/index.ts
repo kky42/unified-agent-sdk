@@ -34,6 +34,49 @@ import { AsyncEventStream, normalizeStructuredOutputSchema } from "@unified-agen
 
 export const PROVIDER_CLAUDE_AGENT_SDK = "@anthropic-ai/claude-agent-sdk" as ProviderId;
 
+const DEFAULT_CLAUDE_SANDBOX_ALLOWED_DOMAINS = [
+  // Claude Code sandbox networking is allow-list driven. Local HTTP APIs are critical for agents.
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "*.com",
+  "*.net",
+  "*.org",
+  "*.io",
+  "*.ai",
+  "*.dev",
+  "*.app",
+  "*.co",
+  "*.me",
+  "*.gg",
+  "*.edu",
+  "*.gov",
+  "*.us",
+  "*.uk",
+  "*.ca",
+  "*.de",
+  "*.fr",
+  "*.jp",
+  "*.cn",
+  "*.in",
+  "*.br",
+  "*.au",
+  "*.nz",
+  "*.ch",
+  "*.nl",
+  "*.se",
+  "*.no",
+  "*.fi",
+  "*.es",
+  "*.it",
+  "*.pl",
+  "*.kr",
+  "*.sg",
+  "*.hk",
+  "*.tw",
+  "*.mx",
+];
+
 type UnifiedOwnedClaudeOptionKeys =
   | "cwd"
   | "additionalDirectories"
@@ -256,7 +299,9 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
 
     const runProvider: Partial<ClaudeSessionConfig> = req.config?.provider ?? {};
 
-    const unifiedAccessOptions = mapUnifiedAccessToClaude(normalizeAccess(this.access), {
+    const access = normalizeAccess(this.access);
+
+    const unifiedAccessOptions = mapUnifiedAccessToClaude(access, {
       cwd: this.workspace?.cwd,
       additionalDirs: this.workspace?.additionalDirs,
     });
@@ -279,6 +324,18 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
       // so using the initial sessionId can silently drop context.
       resume: this.sessionId,
     };
+
+    // Claude sandbox write permissions are derived from `permissions.allow` rules for `Edit(...)` rather than `--add-dir`.
+    // If we enable sandboxing (auto=medium), ensure that additional workspace roots are also writable in the sandbox.
+    maybeInjectClaudeSandboxWriteRulesForAdditionalDirs(options, access, {
+      cwd: this.workspace?.cwd,
+      additionalDirs: this.workspace?.additionalDirs,
+    });
+
+    // Claude Code permission rules can pre-allow networky commands (e.g. `Bash(curl:*)`) in user settings.
+    // To keep unified `auto=low` portable across providers (Codex read-only blocks curl), inject deny rules.
+    maybeInjectClaudeDenyRulesForAutoLow(options, access);
+
     options.maxThinkingTokens = mapReasoningEffortToClaudeMaxThinkingTokens(this.reasoningEffort ?? "medium");
     if (this.model) options.model = this.model;
     if (options.settingSources === undefined) options.settingSources = ["user", "project"];
@@ -454,8 +511,6 @@ function truncate(text: string, maxLen = 500): string {
 function normalizeAccess(input: AccessConfig | undefined): Required<AccessConfig> {
   return {
     auto: input?.auto ?? "medium",
-    network: input?.network ?? true,
-    webSearch: input?.webSearch ?? true,
   };
 }
 
@@ -485,13 +540,9 @@ function readUnifiedAgentSdkSessionConfig(handle: SessionHandle): UnifiedAgentSd
   const access = cfg.access;
   if (access && typeof access === "object" && !Array.isArray(access)) {
     const auto = (access as { auto?: unknown }).auto;
-    const network = (access as { network?: unknown }).network;
-    const webSearch = (access as { webSearch?: unknown }).webSearch;
 
     out.access = {
       ...(auto === "low" || auto === "medium" || auto === "high" ? { auto } : {}),
-      ...(typeof network === "boolean" ? { network } : {}),
-      ...(typeof webSearch === "boolean" ? { webSearch } : {}),
     };
   }
 
@@ -546,8 +597,6 @@ function mapUnifiedAccessToClaude(
 
   const isMedium = access.auto === "medium";
   const disallowedTools = ["AskUserQuestion"];
-  if (!access.network) disallowedTools.push("WebFetch");
-  if (!access.webSearch) disallowedTools.push("WebSearch");
   if (!isMedium) disallowedTools.push("Write", "Edit", "NotebookEdit", "KillShell");
 
   return {
@@ -555,7 +604,17 @@ function mapUnifiedAccessToClaude(
     permissionMode: "default",
     disallowedTools,
     sandbox: isMedium
-      ? { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false }
+      ? {
+          enabled: true,
+          autoAllowBashIfSandboxed: false,
+          allowUnsandboxedCommands: false,
+          network: {
+            // Claude Code sandbox networking is allow-list driven. To make unified `auto=medium` practical,
+            // allow localhost + a broad set of common public domains.
+            allowedDomains: DEFAULT_CLAUDE_SANDBOX_ALLOWED_DOMAINS,
+            allowLocalBinding: true,
+          },
+        }
       : { enabled: false },
     canUseTool: async (toolName, toolInput, meta) => {
       const deny = (message: string) => ({ behavior: "deny" as const, message, interrupt: false as const });
@@ -577,13 +636,9 @@ function mapUnifiedAccessToClaude(
           return deny("Bash sandbox escape is disabled in auto=medium.");
         }
 
-        if (!access.network && isNetworkyBashCommand(command)) {
-          return deny("Bash network access is disabled by unified access (network=false).");
-        }
-
         if (!isMedium) {
-          // auto=low: deny mutations; allow a conservative read-only set (with network when enabled).
-          if (!isReadOnlyBashCommand(command, { allowNetwork: access.network })) {
+          // auto=low: deny mutations; keep behavior portable across providers by denying networky commands.
+          if (!isReadOnlyBashCommand(command, { allowNetwork: false })) {
             return deny("Bash command denied by unified access (auto=low).");
           }
         }
@@ -612,6 +667,107 @@ function mapUnifiedAccessToClaude(
       return { behavior: "allow" as const, updatedInput };
     },
   };
+}
+
+function maybeInjectClaudeSandboxWriteRulesForAdditionalDirs(
+  options: ClaudeOptions,
+  access: Required<AccessConfig>,
+  workspace: { cwd?: string; additionalDirs?: string[] } | undefined,
+): void {
+  if (access.auto !== "medium") return;
+  if (!options.sandbox?.enabled) return;
+
+  const extraArgs = options.extraArgs ?? {};
+  if (typeof extraArgs.settings === "string" && extraArgs.settings.trim()) return;
+
+  const additionalDirs = Array.isArray(workspace?.additionalDirs) ? workspace.additionalDirs : [];
+  if (additionalDirs.length === 0) return;
+
+  const baseDir = typeof workspace?.cwd === "string" && workspace.cwd ? workspace.cwd : undefined;
+  const uniqueCanonicalDirs = new Set<string>();
+  for (const dir of additionalDirs) {
+    if (typeof dir !== "string" || !dir.trim()) continue;
+    const canonical = canonicalizePathForWorkspaceCheck(dir, { baseDir });
+    if (canonical && path.isAbsolute(canonical)) uniqueCanonicalDirs.add(canonical);
+  }
+  if (uniqueCanonicalDirs.size === 0) return;
+
+  // Settings rules use `Edit(<path>)`. Prefix absolute paths with `//` (Claude Code treats `/...` as relative to the
+  // settings file location).
+  const allowRules = Array.from(uniqueCanonicalDirs).map((absDir) => `Edit(${toClaudeSettingsAbsolutePathGlob(absDir)})`);
+  extraArgs.settings = JSON.stringify({ permissions: { allow: allowRules } });
+  options.extraArgs = extraArgs;
+}
+
+const AUTO_LOW_CLAUDE_DENY_RULES: string[] = [
+  "Bash(curl:*)",
+  "Bash(wget:*)",
+  "Bash(nc:*)",
+  "Bash(ncat:*)",
+  "Bash(ssh:*)",
+  "Bash(scp:*)",
+  "Bash(sftp:*)",
+  "Bash(rsync:*)",
+  "Bash(git clone:*)",
+  "Bash(git fetch:*)",
+  "Bash(git pull:*)",
+];
+
+function maybeInjectClaudeDenyRulesForAutoLow(options: ClaudeOptions, access: Required<AccessConfig>): void {
+  if (access.auto !== "low") return;
+
+  const extraArgs = options.extraArgs ?? {};
+
+  const existingSettings =
+    typeof extraArgs.settings === "string" && extraArgs.settings.trim() ? extraArgs.settings.trim() : undefined;
+
+  let settings: Record<string, unknown> = {};
+  if (existingSettings) {
+    try {
+      const parsed = JSON.parse(existingSettings) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) settings = parsed as Record<string, unknown>;
+    } catch {
+      // If an integrator provided non-JSON settings (e.g. a file path), don't override it.
+      return;
+    }
+  }
+
+  const permissionsRaw = settings.permissions;
+  const permissions: Record<string, unknown> =
+    permissionsRaw && typeof permissionsRaw === "object" && !Array.isArray(permissionsRaw)
+      ? (permissionsRaw as Record<string, unknown>)
+      : {};
+
+  const denyRaw = permissions.deny;
+  const deny = Array.isArray(denyRaw)
+    ? denyRaw.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    : [];
+  const nextDeny = Array.from(new Set([...deny, ...AUTO_LOW_CLAUDE_DENY_RULES]));
+
+  const nextSettings = {
+    ...settings,
+    permissions: {
+      ...permissions,
+      deny: nextDeny,
+    },
+  };
+
+  extraArgs.settings = JSON.stringify(nextSettings);
+  options.extraArgs = extraArgs;
+}
+
+function toClaudeSettingsAbsolutePathGlob(absPath: string): string {
+  const trimmed = absPath.trim();
+  const normalized = trimmed.replace(/[\\/]+$/, "");
+  if (!normalized) return normalized;
+
+  // On POSIX, Claude Code treats `/...` as relative-to-settings-file, so use `//...` to express an absolute path.
+  if (normalized.startsWith("/")) return `//${normalized.slice(1)}/**`;
+
+  // On Windows, absolute paths don't start with `/`; pass them through as-is.
+  // Use a best-effort separator for the trailing glob.
+  const sep = normalized.includes("\\") ? "\\" : "/";
+  return `${normalized}${sep}**`;
 }
 
 function isWriteLikeTool(toolName: string): boolean {
@@ -753,15 +909,6 @@ function isReadOnlyBashCommand(command: string, opts: { allowNetwork: boolean })
   }
   if (/^\s*git\s+(status|diff|log|show)\b/.test(c)) return true;
 
-  return false;
-}
-
-function isNetworkyBashCommand(command: string): boolean {
-  const c = command.trim();
-  if (!c) return false;
-  // Conservative heuristic: treat these as network-capable. (Better to deny than allow.)
-  if (/\b(curl|wget|nc|ncat|ssh|scp|sftp|rsync|telnet|ping)\b/.test(c)) return true;
-  if (/\b(git\s+(clone|fetch|pull))\b/.test(c)) return true;
   return false;
 }
 

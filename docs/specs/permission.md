@@ -5,12 +5,10 @@ This SDK exposes a small, provider-agnostic access surface via `SessionConfig.ac
 ```ts
 type AccessConfig = {
   auto?: "low" | "medium" | "high";
-  network?: boolean; // default true
-  webSearch?: boolean; // default true
 };
 ```
 
-These flags are **mapped by each provider adapter** into that provider’s sandbox/approval/permission mechanisms.
+These flags are **mapped by each provider adapter** into that provider’s sandbox/permission mechanisms.
 
 Source of truth:
 - Codex mapping: `packages/provider-codex/src/index.ts` (`mapUnifiedAccessToCodex`)
@@ -18,62 +16,42 @@ Source of truth:
 
 ## Unified intent
 
-- `auto="low"`: read-only (no file edits; limited bash).
-- `auto="medium"`: allow edits + commands, but keep execution sandboxed where the provider supports it.
-- `auto="high"`: highest permission level with no restraints (use with caution).
-- `network=false`: disable network-capable operations where supported (for example WebFetch; networky bash commands).
-- `webSearch=false`: disable the provider web search tool.
+- `auto="low"`: read-only + WebSearch (if supported). For portability, do not rely on shell network tools (for example `curl`); use `auto="medium"` for HTTP/local APIs.
+- `auto="medium"`: sandboxed writes (workspace-write) + WebSearch + network (including local URLs / local HTTP APIs).
+- `auto="high"`: unrestricted / bypass (use with caution).
 
-Note: `auto="high"` is intended to mean “no restraints”; provider adapters may treat `network`/`webSearch` as effectively enabled in this mode.
+## Provider mapping
 
-## Provider differences (important)
-
-These settings are **portable intent**, not a guarantee of identical enforcement:
-
-- **Codex** primarily relies on Codex CLI sandboxing (`ThreadOptions.sandboxMode`) to constrain writes/execution scope.
-- **Claude** primarily relies on tool allow/deny + `canUseTool` gating; its “sandbox” is not the same primitive as Codex’s sandbox modes.
-
-Practical implications:
-- In `auto="medium"`, both adapters aim to keep execution constrained, but the mechanism differs (sandbox vs gating) and edge cases differ.
-- Workspace scoping is best-effort in providers that don’t enforce a strict OS-level sandbox; treat access controls as defense-in-depth, not a security boundary.
-
-## Codex
+### Codex
 
 Codex enforcement is primarily driven by `ThreadOptions.sandboxMode` + `ThreadOptions.approvalPolicy`.
 
-### Mapping (unified → Codex)
-
 The Codex adapter sets:
 - `approvalPolicy = "never"` (no interactive approvals)
-- `networkAccessEnabled = access.network`
-- `webSearchEnabled = access.webSearch`
 - `sandboxMode` from `access.auto`:
   - `low` → `"read-only"`
   - `medium` → `"workspace-write"`
   - `high` → `"danger-full-access"`
+- `networkAccessEnabled = true`
+- `webSearchEnabled = true`
 
 Notes:
-- Codex sandbox modes mostly constrain **writes/execution scope**; read-only inspection may still read broadly depending on Codex CLI behavior.
-- In `auto="high"`, the Codex adapter enables network + web search regardless of `access.network` / `access.webSearch` (to match “no restraints” intent).
+- Network behavior can still be affected by Codex CLI/environment configuration (for example `CODEX_SANDBOX_NETWORK_DISABLED=1`).
+- On current Codex CLI builds, `sandboxMode="read-only"` (`auto="low"`) may block shell network tools like `curl`; use `auto="medium"` for local HTTP APIs if you need `curl`.
 
-## Claude
+### Claude
 
 Claude enforcement combines:
 - Claude Code permission mode (`permissionMode`)
 - tool allow/deny (adapter uses `disallowedTools`)
-- programmatic permission gate (`canUseTool`) when non-interactive
-- optional Claude sandbox settings (`Options.sandbox`, injected via CLI `--settings`)
-
-### Mapping (unified → Claude)
+- programmatic permission gate (`canUseTool`) for non-interactive runs
+- optional Claude sandbox settings (`Options.sandbox`)
 
 The Claude adapter maps:
 - `auto="high"` → `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true` + `sandbox.enabled=false` + no `canUseTool`
 - `auto="medium"` → `permissionMode="default"` + `sandbox.enabled=true` + `sandbox.allowUnsandboxedCommands=false` + `canUseTool` gate
 - `auto="low"` → `permissionMode="default"` + `sandbox.enabled=false` + `canUseTool` gate (read-only)
 
-In `auto="low"`, `canUseTool` allows a conservative set of read-only commands; when `network=true` it also allows `curl`/`wget` in “stdout-only” mode (blocks output-to-file flags).
-
 Notes:
-- Claude’s “sandbox” does not behave exactly like Codex’s sandbox modes; workspace scoping is implemented via permission gating and provider behavior.
-- In the Claude adapter, `network=false` removes `WebFetch` and also blocks network-ish `Bash` commands.
-- `webSearch=false` removes `WebSearch`.
+- Claude Code sandbox networking is allow-list driven. In `auto="medium"`, this repo’s adapter configures `sandbox.network.allowedDomains` and includes `localhost` / `127.0.0.1` / `::1` so local HTTP APIs work.
+- For consistency with Codex `auto="low"` behavior, this repo’s adapter denies network-capable `Bash` commands in `auto="low"` (for example `curl`, `wget`, `ssh`).

@@ -56,7 +56,7 @@ const session = await runtime.openSession({
   config: {
     workspace: { cwd: process.cwd() },
     model: process.env.CLAUDE_MODEL,
-    access: { auto: "medium", network: true, webSearch: true },
+    access: { auto: "medium" },
     provider: {
       // `ClaudeSessionConfig` is Claude `Options` minus unified-owned keys.
     },
@@ -138,12 +138,20 @@ To load a `CLAUDE.md` that lives in your workspace, ensure `workspace.cwd` is th
 
 If you want to *relocate* user settings (instead of using `~/.claude`), set `CLAUDE_CONFIG_DIR` (or pass `home` to `createRuntime()` in `@unified-agent-sdk/runtime`).
 
+Note: always use an **absolute path** for `CLAUDE_CONFIG_DIR` / `home` / `--home`. Claude Code resolves relative paths against its working directory (`Options.cwd`), which can accidentally load the wrong profile/auth state.
+
 ### Permission rules (what is allowed/asked/denied)
 
 Claude Code permissions are defined in settings (for example `.claude/settings.json`) using allow/ask/deny rules for tools like `Read`, `Edit`, `Bash`, and `WebFetch`. For example:
 
 - If you want Claude to *write* outside the working directory, you must allow `Edit` for those paths.
-- If you want Claude to *fetch from the internet*, you must allow `WebFetch` (and optionally configure sandbox network access).
+- If you want Claude to *fetch from the internet* in `access.auto="medium"`, ensure the sandbox network allowlist permits the target host.
+
+In this repo’s adapter, `access.auto="medium"` enables the Claude Code sandbox and includes `localhost` / `127.0.0.1` / `::1` in the allowlist so local HTTP APIs work.
+
+Note: in Claude Code, sandbox filesystem write permissions are derived from these `Edit(...)` allow rules. In this unified SDK, `workspace.additionalDirs` (aka `--add-dir`) are treated as writable roots in `access.auto="medium"` by injecting `Edit(...)` allow rules automatically (unless you override settings via `extraArgs.settings`).
+
+For portability with Codex `access.auto="low"` (`sandboxMode="read-only"`), this adapter treats `access.auto="low"` as **no shell networking** and denies network-capable `Bash` commands (for example `curl`, `wget`, `ssh`). It enforces this both via the programmatic `canUseTool` gate and by injecting `permissions.deny` rules via Claude Code `--settings`, so user settings that pre-allow `Bash(curl:*)` can’t bypass unified `auto="low"`.
 
 ### Permission prompts + modes (`permissionMode`)
 

@@ -4,6 +4,10 @@ These experiments verify which unified-agent-sdk `SessionConfig` fields can be c
 
 This matters for orchestrators that keep long-lived sessions and want to adjust settings like model, reasoning effort, or access level over time.
 
+Note: these are exploratory results. For the consolidated, point-in-time e2e matrix used to answer “does it work end-to-end?”, see [2026-01-23: Permission E2E Testing](2026-01-23-permission-e2e-testing.md).
+
+Note: `uagent` interactive mode does **not** implement in-session config commands (only `/exit`). To test in-flight reconfiguration from the CLI, use `uagent --dump-handle ...` and then `uagent resume --handle ...` to apply new settings via the `snapshot()`/metadata/`resumeSession()` flow.
+
 ## Tested on (point-in-time)
 
 | Item | Value |
@@ -17,14 +21,14 @@ This matters for orchestrators that keep long-lived sessions and want to adjust 
 |---------|-------|--------|
 | **model** | ✅ Works, history preserved | ✅ Works, history preserved |
 | **reasoningEffort** | ✅ Works | ✅ Works |
-| **workspace.cwd** | ✅ Works | ✅ Works |
+| **workspace.cwd** | ✅ Works | ❌ Fails in practice* |
 | **workspace.additionalDirs** | ✅ Works | ✅ Works |
 | **access.auto** (low→medium) | ✅ Works | ✅ Works |
-| **access.network** | ✅ Works | ✅ Works |
-| **access.webSearch** (enable) | ✅ Works | ✅ Works |
-| **access.webSearch** (disable) | ✅ Works | ⚠️ May fail* |
+| **access.auto** (medium→high) | ✅ Works | ✅ Works |
 
-*Claude caveat: Restricting tools that were previously used in the conversation may not be enforced due to conversation context influence.
+*Claude caveats:
+- In this environment, resuming with a different `workspace.cwd` caused Claude Code to exit with an error even when the directory exists. Treat `cwd` changes as “start a new session”.
+- Restricting tools that were previously used in the conversation may not be enforced due to conversation context influence.
 
 ## How It Works
 
@@ -35,6 +39,22 @@ This matters for orchestrators that keep long-lived sessions and want to adjust 
 3. Call `runtime.resumeSession(handle)` → new session with updated config
 
 Conversation history is preserved (same native `sessionId`).
+
+## Secret-word verification pattern (recommended)
+
+For access/workspace changes, validate **all three**:
+1) **Context preserved** (the assistant recalls a secret word)
+2) **Session preserved** (native `sessionId` unchanged)
+3) **Policy changed** (restricted action denied before, allowed after)
+
+Example recipe:
+
+1) Start with restrictive config (e.g. `access.auto="low"`).
+2) Ask the agent to remember a secret word and attempt a restricted action (e.g. write a file). Confirm denial.
+3) `snapshot()` → mutate metadata to upgrade permissions (e.g. `access.auto="medium"`).
+4) `resumeSession(handle)` and confirm `resumed.sessionId === original.sessionId`.
+5) Ask for the secret word (proves same conversation history).
+6) Retry the restricted action (should now succeed).
 
 ## Example: update `access.auto` mid-session
 
@@ -76,10 +96,6 @@ const resumed = await runtime.resumeSession(handle);
 - File writes blocked in read-only mode, allowed after upgrade
 - Works for both providers
 
-### WebSearch Toggle
-- **Enable** (false → true): Works for both providers
-- **Disable** (true → false): Works for Codex, but Claude may still use WebSearch if it was used earlier in the conversation
-
 ## Security Consideration
 
 For security-critical access restrictions with Claude, consider starting a fresh session rather than resuming, as conversation context may override tool restrictions.
@@ -87,4 +103,4 @@ For security-critical access restrictions with Claude, consider starting a fresh
 ## See Also
 
 - [Configuration](../guides/config.md)
-- [Access & Sandboxing](access.md)
+- [Permission E2E Testing](2026-01-23-permission-e2e-testing.md)

@@ -42,27 +42,11 @@ export type AccessLevel = "low" | "medium" | "high";
 export type AccessConfig = {
   /**
    * High-level access preset.
-   * - low: read-only
-   * - medium: sandboxed writes/commands/tools
+   * - low: read-only + web search (if supported); shell networking is intentionally conservative
+   * - medium: sandboxed writes + web search + network (including localhost)
    * - high: unrestricted (no sandbox / bypass)
    */
   auto?: AccessLevel;
-  /**
-   * Allow outbound network access (provider-dependent).
-   *
-   * Notes:
-   * - For Codex, this controls sandboxed command network access.
-   * - For Claude, this controls network-capable tools (WebFetch) and network-ish Bash commands.
-   */
-  network?: boolean;
-  /**
-   * Allow the provider web search tool (provider-dependent).
-   *
-   * Notes:
-   * - For Codex, this controls the `web_search` tool.
-   * - For Claude, this controls the `WebSearch` tool.
-   */
-  webSearch?: boolean;
 };
 
 /**

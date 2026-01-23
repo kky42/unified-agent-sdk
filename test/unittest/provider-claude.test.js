@@ -283,15 +283,13 @@ test("Claude adapter forwards tool_progress as provider.event (not tool.call)", 
   assert.equal(providerEvents[1].payload?.type, "tool_progress");
 });
 
-test("Claude adapter maps unified SessionConfig.access into Claude options (auto x network x webSearch + default)", async (t) => {
-  const cases = [{ name: "default", access: undefined }];
-  for (const auto of ["low", "medium", "high"]) {
-    for (const network of [false, true]) {
-      for (const webSearch of [false, true]) {
-        cases.push({ name: `auto=${auto} network=${network} webSearch=${webSearch}`, access: { auto, network, webSearch } });
-      }
-    }
-  }
+test("Claude adapter maps unified SessionConfig.access into Claude options (auto only + default)", async (t) => {
+  const cases = [
+    { name: "default", access: undefined },
+    { name: "auto=low", access: { auto: "low" } },
+    { name: "auto=medium", access: { auto: "medium" } },
+    { name: "auto=high", access: { auto: "high" } },
+  ];
 
   for (const c of cases) {
     await t.test(c.name, async () => {
@@ -299,8 +297,6 @@ test("Claude adapter maps unified SessionConfig.access into Claude options (auto
         query: ({ options }) =>
           (async function* () {
             const auto = c.access?.auto ?? "medium";
-            const expectedNetwork = c.access?.network ?? true;
-            const expectedWebSearch = c.access?.webSearch ?? true;
 
             if (auto === "high") {
               assert.equal(options.permissionMode, "bypassPermissions");
@@ -314,6 +310,11 @@ test("Claude adapter maps unified SessionConfig.access into Claude options (auto
               if (auto === "medium") {
                 assert.equal(options.sandbox?.autoAllowBashIfSandboxed, false);
                 assert.equal(options.sandbox?.allowUnsandboxedCommands, false);
+                assert.ok(Array.isArray(options.sandbox?.network?.allowedDomains));
+                assert.ok(options.sandbox?.network?.allowedDomains.includes("*.com"));
+                assert.ok(options.sandbox?.network?.allowedDomains.includes("localhost"));
+                assert.ok(options.sandbox?.network?.allowedDomains.includes("127.0.0.1"));
+                assert.equal(options.sandbox?.network?.allowLocalBinding, true);
               }
               assert.equal(typeof options.canUseTool, "function");
               assert.equal(options.permissionPromptToolName, undefined);
@@ -324,8 +325,8 @@ test("Claude adapter maps unified SessionConfig.access into Claude options (auto
               const decisionFor = async (toolName, toolInput = {}) => options.canUseTool(toolName, toolInput, {});
 
               assert.equal((await decisionFor("AskUserQuestion")).behavior, "deny");
-              assert.equal((await decisionFor("WebFetch")).behavior, expectedNetwork ? "allow" : "deny");
-              assert.equal((await decisionFor("WebSearch")).behavior, expectedWebSearch ? "allow" : "deny");
+              assert.equal((await decisionFor("WebFetch")).behavior, "allow");
+              assert.equal((await decisionFor("WebSearch")).behavior, "allow");
 
               assert.equal((await decisionFor("Read")).behavior, "allow");
               assert.equal((await decisionFor("Grep")).behavior, "allow");
@@ -342,7 +343,7 @@ test("Claude adapter maps unified SessionConfig.access into Claude options (auto
                 assert.equal((await decisionFor("Bash", { command: "find . -maxdepth 1 -exec echo hi \\;" })).behavior, "deny");
                 assert.equal((await decisionFor("Bash", { command: "find . -maxdepth 1 -name '*.md' -print" })).behavior, "allow");
                 const curlDecision = await decisionFor("Bash", { command: "curl https://example.com" });
-                assert.equal(curlDecision.behavior, expectedNetwork ? "allow" : "deny");
+                assert.equal(curlDecision.behavior, "deny");
               } else {
                 const bashAllowed = await decisionFor("Bash", { command: "echo hi > /tmp/x" });
                 assert.equal(bashAllowed.behavior, "allow");
@@ -462,7 +463,7 @@ test("Claude adapter denies out-of-workspace writes when auto=medium (but allows
   });
 
   const session = await runtime.openSession({
-    config: { workspace: { cwd: process.cwd() }, access: { auto: "medium", network: true, webSearch: true } },
+    config: { workspace: { cwd: process.cwd() }, access: { auto: "medium" } },
   });
   const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
   for await (const _ev of run.events) {
@@ -518,7 +519,7 @@ test("Claude adapter denies workspace escapes via symlinks when auto=medium", as
     });
 
     const session = await runtime.openSession({
-      config: { workspace: { cwd: workspaceDir }, access: { auto: "medium", network: true, webSearch: true } },
+      config: { workspace: { cwd: workspaceDir }, access: { auto: "medium" } },
     });
     const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
     await run.result;
@@ -615,7 +616,7 @@ test("Claude resumeSession restores unified session config from snapshot metadat
   const session = await runtime.openSession({
     config: {
       workspace: { cwd: "/repo", additionalDirs: ["/extra"] },
-      access: { auto: "low", network: false, webSearch: false },
+      access: { auto: "low" },
       model: "gpt-5",
       reasoningEffort: "high",
     },

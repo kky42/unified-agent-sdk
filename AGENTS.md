@@ -30,20 +30,21 @@ The goal is that an orchestrator can be written once against `UnifiedAgentRuntim
 - **Provider differences should be explicit in types**: e.g. Codex does not support run-level provider config, so it is typed as `never`.
 - **Prefer readable mapping**: adapters should map upstream events into `RuntimeEvent` in a predictable way.
 - **Docs are part of the API**: if you change config semantics, update `docs/guides/config.md` and `docs/guides/orchestrator.md` in the same PR.
-- **Docs are fully published**: every page under `docs/**/*.md` must be included in the MkDocs website nav (`mkdocs.yml`). Keep user docs outside `docs/specs/`, and put implementation/developer docs under `docs/specs/`.
+- **Docs are fully published**: every Markdown page under `docs/` must be included in the MkDocs website nav (`mkdocs.yml`). Keep user docs outside `docs/specs/`, and put implementation/developer docs under `docs/specs/`.
 
 ## Read this before making changes
 
 | If you’re working on… | Read |
 |---|---|
-| where to start | `docs/docs-map.md` |
+| where to start | `docs/index.md` |
 | config types / semantics | `docs/guides/config.md` |
 | orchestrator wiring | `docs/guides/orchestrator.md` |
 | testing strategy | `docs/specs/testing.md` |
+| e2e permission/access tests | `docs/specs/e2e-testing-principles.md` |
 | Claude-specific behavior | `docs/providers/claude.md` |
 | Codex-specific behavior | `docs/providers/codex.md` |
 
-Before running manual agent behavior tests (for example `uagent exec` / smoke / integration), read `docs/specs/testing.md` and follow the temporary-workspace approach to avoid damaging the user’s machine.
+Before running **real-provider e2e tests** (for example permission/access verification), read `docs/specs/e2e-testing-principles.md` first.
 
 ## Development commands
 
@@ -52,32 +53,6 @@ Before running manual agent behavior tests (for example `uagent exec` / smoke / 
 - `npm test` (unit tests only; no real agent execution)
 - `npm run test:smoke` (real SDK + real API calls; local)
 - `npm run test:integration` (real SDK + real API calls)
-
-## Manual verification with uagent CLI
-
-After making changes to adapters, event mapping, or CLI output, **verify with real API requests** using the `uagent` CLI in verbose mode. This is the most reliable way to confirm functionality works end-to-end.
-
-```bash
-# Build first
-npm run build
-
-# Test with Codex
-./packages/uagent/bin/uagent.js codex exec --verbose "your prompt here"
-
-# Test with Claude
-./packages/uagent/bin/uagent.js claude exec --verbose "your prompt here"
-```
-
-Useful flags for verification:
-- `--verbose`: Show full agent steps (tools, reasoning, streaming output)
-- `--trace`: Print unified runtime events to stderr
-- `--trace-raw`: Print raw provider payloads (very verbose; implies `--trace`)
-- `--reasoning-effort <level>`: Test reasoning output (`none`, `low`, `medium`, `high`, `xhigh`)
-
-Example verification scenarios:
-- **Reasoning output**: Use `--verbose --reasoning-effort high` with a prompt that triggers reasoning
-- **Tool calls**: Use `--verbose` with a prompt that requires file operations or web search
-- **Streaming**: Watch for smooth delta output vs. chunked/delayed text
 
 ## Integration tests (opt-in)
 
@@ -90,6 +65,7 @@ Auth:
 Home directory overrides (to avoid writing to user home):
 - `TEST_CLAUDE_HOME`: Override Claude home directory (default: `~/.claude`)
 - `TEST_CODEX_HOME`: Override Codex home directory (default: `~/.codex`)
+- Always use an **absolute path** for `--home` / `home` / `TEST_*_HOME` (relative paths resolve against the session `workspace.cwd` and can silently use the wrong profile).
 
 Note: running the full integration/smoke suites expects both providers to be configured (missing credentials will fail the run).
 
@@ -103,7 +79,8 @@ Note: running the full integration/smoke suites expects both providers to be con
 ### Codex SDK
 - **No text streaming:** As of v0.80.0–v0.88.0, the Codex CLI does not emit streaming delta events for text content. Reasoning and agent messages appear all at once (only `item.completed` events, no `item.started`/`item.updated`). See `docs/providers/codex.md` for details.
 - For predictable CI runs, prefer conservative thread defaults:
-  - `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `webSearchEnabled: false`, `networkAccessEnabled: false`, `skipGitRepoCheck: true`.
+  - `sandboxMode: "read-only"`, `approvalPolicy: "never"`, `skipGitRepoCheck: true`.
+  - Note: unified-agent-sdk `access.auto` presets always enable Codex `webSearchEnabled` + `networkAccessEnabled`.
 - Set `CODEX_HOME` to a repo-local directory (e.g. `.cache/codex-test`) to avoid writing to the user home directory.
 
 ## Debugging

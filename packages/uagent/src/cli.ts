@@ -1,9 +1,17 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { inspect } from "node:util";
 
-import { createRuntime, type UnifiedSession } from "@unified-agent-sdk/runtime";
+import {
+  UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY,
+  createRuntime,
+  type SessionHandle,
+  type UnifiedAgentSdkSessionHandleMetadataV1,
+  type UnifiedSession,
+  type UnifiedAgentSdkSessionConfigSnapshot,
+} from "@unified-agent-sdk/runtime";
 
 type ProviderFlag = "codex" | "claude";
 type AutoLevel = "low" | "medium" | "high";
@@ -23,14 +31,21 @@ type ParsedArgs =
   | {
       mode: "exec";
       provider: ProviderFlag;
+      resumeHandle?: string;
+      resumeOverrides?: {
+        workspace?: string;
+        addDirs?: string[];
+        access?: { auto?: AutoLevel };
+        model?: string;
+        reasoningEffort?: ReasoningEffort;
+      };
       home?: string;
       workspace: string;
       addDirs?: string[];
       auto?: AutoLevel;
       model?: string;
       reasoningEffort?: ReasoningEffort;
-      network?: boolean;
-      webSearch?: boolean;
+      dumpHandle?: string;
       verbose?: boolean;
       trace?: boolean;
       traceRaw?: boolean;
@@ -39,14 +54,21 @@ type ParsedArgs =
   | {
       mode: "interactive";
       provider: ProviderFlag;
+      resumeHandle?: string;
+      resumeOverrides?: {
+        workspace?: string;
+        addDirs?: string[];
+        access?: { auto?: AutoLevel };
+        model?: string;
+        reasoningEffort?: ReasoningEffort;
+      };
       home?: string;
       workspace: string;
       addDirs?: string[];
       auto?: AutoLevel;
       model?: string;
       reasoningEffort?: ReasoningEffort;
-      network?: boolean;
-      webSearch?: boolean;
+      dumpHandle?: string;
       verbose?: boolean;
       trace?: boolean;
       traceRaw?: boolean;
@@ -59,16 +81,20 @@ function printHelp(): void {
       "",
       "Usage:",
       "  uagent <codex|claude> exec [--home <dir>] [--workspace <dir>] [--add-dir <dir>]... \"prompt\"",
+      "  uagent <codex|claude> resume --handle <file> [--workspace <dir>] [--add-dir <dir>]... \"prompt\"",
       "  uagent <codex|claude> [--home <dir>] [--workspace <dir>] [--add-dir <dir>]...",
+      "  uagent <codex|claude> resume --handle <file> [--workspace <dir>] [--add-dir <dir>]...",
+      "",
+      "Resume:",
+      "  --handle       JSON SessionHandle file from --dump-handle",
       "",
       "Workspace scope:",
       "  --workspace  Working directory root (default: cwd)",
       "  --add-dir    Additional writable root (repeatable)",
+      "  --dump-handle  Write a JSON SessionHandle to this file",
       "",
       "Access:",
       "  --auto <low|medium|high>   Access preset (default: medium)",
-      "  --network[=true|false]  Outbound network (default: true)",
-      "  --websearch[=true|false] Web search tool (default: true)",
       "",
       "Model & reasoning:",
       "  --model, -m <id>                     Model id (provider-specific)",
@@ -102,7 +128,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   if (args.includes("-h") || args.includes("--help")) return { mode: "help" };
 
   const parseWithStartIndex = (startIndex: number) => {
-    const valueFlags = new Set(["home", "workspace", "auto", "model", "reasoning-effort"]);
+    const valueFlags = new Set(["home", "workspace", "auto", "model", "reasoning-effort", "handle", "dump-handle"]);
     const flags = new Map<string, string | true>();
     const positionals: string[] = [];
     const addDirs: string[] = [];
@@ -152,14 +178,6 @@ function parseArgs(argv: string[]): ParsedArgs {
       const name = eq === -1 ? raw : raw.slice(0, eq);
       const inlineValue = eq === -1 ? undefined : raw.slice(eq + 1);
 
-      if (name.startsWith("no-")) {
-        const base = name.slice(3);
-        if (base === "network" || base === "websearch") {
-          flags.set(base, "false");
-          continue;
-        }
-      }
-
       if (name === "add-dir") {
         if (typeof inlineValue === "string" && inlineValue.length) {
           addDirs.push(inlineValue);
@@ -177,8 +195,6 @@ function parseArgs(argv: string[]): ParsedArgs {
       }
 
       const allowedBooleanFlags = new Set([
-        "network",
-        "websearch",
         "verbose",
         "trace",
         "trace-raw",
@@ -248,12 +264,20 @@ function parseArgs(argv: string[]): ParsedArgs {
       return { mode: "help" as const };
     }
 
-    const network = parseBoolFlag(flags.get("network")) ?? true;
-    const webSearch = parseBoolFlag(flags.get("websearch")) ?? true;
-    const verbose = parseBoolFlag(flags.get("verbose")) ?? false;
+      const verbose = parseBoolFlag(flags.get("verbose")) ?? false;
 
-    const traceRaw = parseBoolFlag(flags.get("trace-raw")) ?? false;
-    const trace = (parseBoolFlag(flags.get("trace")) ?? false) || traceRaw;
+      const traceRaw = parseBoolFlag(flags.get("trace-raw")) ?? false;
+      const trace = (parseBoolFlag(flags.get("trace")) ?? false) || traceRaw;
+
+      const dumpHandleRaw = flags.get("dump-handle");
+      if (dumpHandleRaw === true) return { mode: "help" as const };
+      const dumpHandle = typeof dumpHandleRaw === "string" ? dumpHandleRaw.trim() : undefined;
+      if (dumpHandle !== undefined && !dumpHandle) return { mode: "help" as const };
+
+      const handleRaw = flags.get("handle");
+      if (handleRaw === true) return { mode: "help" as const };
+      const handle = typeof handleRaw === "string" ? handleRaw.trim() : undefined;
+      if (handle !== undefined && !handle) return { mode: "help" as const };
 
     return {
       flags,
@@ -264,8 +288,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       auto,
       model,
       reasoningEffort,
-      network,
-      webSearch,
+      dumpHandle,
+      handle,
       verbose,
       trace,
       traceRaw,
@@ -278,7 +302,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   if (providerPos === "codex" || providerPos === "claude") {
     const command = args[1];
     const isExec = command === "exec";
-    const parsed = parseWithStartIndex(isExec ? 2 : 1);
+    const isResume = command === "resume";
+    const parsed = parseWithStartIndex(isExec || isResume ? 2 : 1);
     if ("mode" in parsed && parsed.mode === "help") return { mode: "help" };
     const {
       flags,
@@ -289,8 +314,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       auto,
       model,
       reasoningEffort,
-      network,
-      webSearch,
+      dumpHandle,
+      handle,
       verbose,
       trace,
       traceRaw,
@@ -302,20 +327,33 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (flags.get("add-dir") === true) return { mode: "help" };
 
-    if (isExec) {
+    if (isResume && !handle) return { mode: "help" };
+
+    if (isExec || isResume) {
       const prompt = positionals.join(" ").trim();
       if (!prompt) return { mode: "help" };
       return {
         mode: "exec",
         provider: providerPos,
+        ...(isResume
+          ? {
+              resumeHandle: handle,
+              resumeOverrides: {
+                ...(flags.has("workspace") ? { workspace } : {}),
+                ...(addDirs.length ? { addDirs } : {}),
+                ...(flags.has("auto") ? { access: { auto } } : {}),
+                ...(flags.has("model") ? { model } : {}),
+                ...(flags.has("reasoning-effort") ? { reasoningEffort } : {}),
+              },
+            }
+          : {}),
         home,
         workspace,
         addDirs,
         auto,
         model,
         reasoningEffort,
-        network,
-        webSearch,
+        dumpHandle,
         verbose,
         trace,
         traceRaw,
@@ -326,14 +364,25 @@ function parseArgs(argv: string[]): ParsedArgs {
     return {
       mode: "interactive",
       provider: providerPos,
+      ...(isResume
+        ? {
+            resumeHandle: handle,
+            resumeOverrides: {
+              ...(flags.has("workspace") ? { workspace } : {}),
+              ...(addDirs.length ? { addDirs } : {}),
+              ...(flags.has("auto") ? { access: { auto } } : {}),
+              ...(flags.has("model") ? { model } : {}),
+              ...(flags.has("reasoning-effort") ? { reasoningEffort } : {}),
+            },
+          }
+        : {}),
       home,
       workspace,
       addDirs,
       auto,
       model,
       reasoningEffort,
-      network,
-      webSearch,
+      dumpHandle,
       verbose,
       trace,
       traceRaw,
@@ -349,6 +398,74 @@ function createRuntimeFor(provider: ProviderFlag, home?: string) {
 
 function turnInput(text: string) {
   return { parts: [{ type: "text" as const, text }] };
+}
+
+async function readSessionHandle(path: string): Promise<SessionHandle> {
+  const raw = await readFile(path, "utf8");
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object") throw new Error(`Invalid SessionHandle JSON: ${path}`);
+  return parsed as SessionHandle;
+}
+
+async function writeSessionHandle(path: string, handle: SessionHandle): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(handle, null, 2)}\n`, "utf8");
+}
+
+function readUnifiedSnapshotFromHandle(handle: SessionHandle): UnifiedAgentSdkSessionConfigSnapshot | undefined {
+  const metadata = handle.metadata;
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const raw = (metadata as Record<string, unknown>)[UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY];
+  if (!raw || typeof raw !== "object") return undefined;
+
+  const v1 = raw as Partial<UnifiedAgentSdkSessionHandleMetadataV1>;
+  if (v1.version !== 1) return undefined;
+  if (!v1.sessionConfig || typeof v1.sessionConfig !== "object") return undefined;
+
+  const cfg = v1.sessionConfig as Record<string, unknown>;
+  const out: UnifiedAgentSdkSessionConfigSnapshot = {};
+
+  const workspace = cfg.workspace;
+  if (workspace && typeof workspace === "object" && !Array.isArray(workspace)) {
+    const cwd = (workspace as { cwd?: unknown }).cwd;
+    const additionalDirs = (workspace as { additionalDirs?: unknown }).additionalDirs;
+    const ws: UnifiedAgentSdkSessionConfigSnapshot["workspace"] = typeof cwd === "string" && cwd ? { cwd } : undefined;
+    if (ws && Array.isArray(additionalDirs) && additionalDirs.every((d) => typeof d === "string" && d)) {
+      ws.additionalDirs = additionalDirs;
+    }
+    if (ws) out.workspace = ws;
+  }
+
+  const access = cfg.access;
+  if (access && typeof access === "object" && !Array.isArray(access)) {
+    const auto = (access as { auto?: unknown }).auto;
+    if (auto === "low" || auto === "medium" || auto === "high") out.access = { auto };
+  }
+
+  const model = cfg.model;
+  if (typeof model === "string" && model.trim()) out.model = model.trim();
+
+  const reasoningEffort = cfg.reasoningEffort;
+  if (
+    reasoningEffort === "none" ||
+    reasoningEffort === "low" ||
+    reasoningEffort === "medium" ||
+    reasoningEffort === "high" ||
+    reasoningEffort === "xhigh"
+  ) {
+    out.reasoningEffort = reasoningEffort;
+  }
+
+  return out;
+}
+
+function writeUnifiedSnapshotToHandle(
+  handle: SessionHandle,
+  snapshot: UnifiedAgentSdkSessionConfigSnapshot,
+): SessionHandle {
+  const metadata = (handle.metadata ??= {});
+  metadata[UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY] = { version: 1, sessionConfig: snapshot } satisfies UnifiedAgentSdkSessionHandleMetadataV1;
+  return handle;
 }
 
 async function runOnce(session: UnifiedSession, prompt: string, opts: { captureTools: boolean }) {
@@ -591,7 +708,7 @@ async function openSession(
   home: string | undefined,
   workspace: string,
   addDirs: string[] | undefined,
-  access: { auto?: AutoLevel; network?: boolean; webSearch?: boolean } | undefined,
+  access: { auto?: AutoLevel } | undefined,
   model: string | undefined,
   reasoningEffort: ReasoningEffort | undefined,
 ) {
@@ -604,9 +721,76 @@ async function openSession(
       workspace: { cwd, ...(additionalDirs ? { additionalDirs } : {}) },
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
-      access: access ?? { auto: "medium", network: true, webSearch: true },
+      access: access ?? { auto: "medium" },
     },
   });
+  return { runtime, session };
+}
+
+async function resumeSessionFromHandleFile(
+  provider: ProviderFlag,
+  home: string | undefined,
+  handleFile: string,
+  opts: {
+    workspace?: string;
+    addDirs?: string[];
+    access?: { auto?: AutoLevel };
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+  },
+) {
+  const runtime = createRuntimeFor(provider, home);
+  const handle = await readSessionHandle(handleFile);
+  if (handle.provider && handle.provider !== runtime.provider) {
+    throw new Error(`SessionHandle provider mismatch: handle=${handle.provider} runtime=${runtime.provider}`);
+  }
+  if (!handle.sessionId) {
+    throw new Error(`SessionHandle is missing sessionId (cannot resume): ${handleFile}`);
+  }
+
+  const existing = readUnifiedSnapshotFromHandle(handle);
+
+  const next: UnifiedAgentSdkSessionConfigSnapshot = existing ? { ...existing } : {};
+  let changed = false;
+
+  const workspaceOverride = opts.workspace ? resolve(opts.workspace) : undefined;
+  const baseCwd = workspaceOverride ?? existing?.workspace?.cwd ?? process.cwd();
+  const baseCwdAbs = resolve(baseCwd);
+  const additionalDirsOverride =
+    opts.addDirs && opts.addDirs.length
+      ? opts.addDirs.map((d) => (isAbsolute(d) ? d : resolve(baseCwdAbs, d)))
+      : undefined;
+
+  if (workspaceOverride !== undefined || additionalDirsOverride !== undefined) {
+    const existingWorkspace = next.workspace;
+    const cwd = workspaceOverride ?? existingWorkspace?.cwd ?? baseCwdAbs;
+    next.workspace = {
+      cwd,
+      ...(existingWorkspace?.additionalDirs ? { additionalDirs: existingWorkspace.additionalDirs } : {}),
+      ...(additionalDirsOverride !== undefined ? { additionalDirs: additionalDirsOverride } : {}),
+    };
+    changed = true;
+  }
+
+  if (opts.access) {
+    next.access = {
+      ...(next.access ?? {}),
+      ...(opts.access.auto !== undefined ? { auto: opts.access.auto } : {}),
+    };
+    changed = true;
+  }
+
+  if (opts.model !== undefined) {
+    next.model = opts.model;
+    changed = true;
+  }
+  if (opts.reasoningEffort !== undefined) {
+    next.reasoningEffort = opts.reasoningEffort;
+    changed = true;
+  }
+
+  if (existing || changed) writeUnifiedSnapshotToHandle(handle, next);
+  const session = await runtime.resumeSession(handle);
   return { runtime, session };
 }
 
@@ -618,24 +802,29 @@ async function main(): Promise<void> {
     return;
   }
 
-  const access = { auto: parsed.auto ?? "medium", network: parsed.network, webSearch: parsed.webSearch };
-
   if (parsed.mode === "exec") {
-    const { runtime, session } = await openSession(
-      parsed.provider,
-      parsed.home,
-      parsed.workspace,
-      parsed.addDirs,
-      access,
-      parsed.model,
-      parsed.reasoningEffort,
-    );
+    if (parsed.provider === "codex" && (parsed.auto ?? "medium") !== "high" && process.env.CODEX_SANDBOX_NETWORK_DISABLED === "1") {
+      process.stderr.write("[uagent] Warning: CODEX_SANDBOX_NETWORK_DISABLED=1 is set; Codex sandbox network may be blocked.\n");
+    }
+    const access = { auto: parsed.auto ?? "medium" };
+    const { runtime, session } = parsed.resumeHandle
+      ? await resumeSessionFromHandleFile(parsed.provider, parsed.home, parsed.resumeHandle, parsed.resumeOverrides ?? {})
+      : await openSession(
+          parsed.provider,
+          parsed.home,
+          parsed.workspace,
+          parsed.addDirs,
+          access,
+          parsed.model,
+          parsed.reasoningEffort,
+        );
     try {
       if (parsed.verbose) {
         const { status, lastErrorMessage } = await runInteractiveTurn(session, parsed.prompt, {
           trace: parsed.trace,
           traceRaw: parsed.traceRaw,
         });
+        if (session.sessionId) process.stderr.write(`[uagent] sessionId=${session.sessionId}\n`);
         process.exitCode = status === "success" ? 0 : 1;
         if (status !== "success") {
           process.stdout.write(`(run status: ${status})\n`);
@@ -644,10 +833,17 @@ async function main(): Promise<void> {
       } else {
         const { status, finalText, lastErrorMessage } = await runOnce(session, parsed.prompt, { captureTools: false });
         process.stdout.write(finalText ? `${finalText}\n` : "");
+        if (session.sessionId) process.stderr.write(`[uagent] sessionId=${session.sessionId}\n`);
         process.exitCode = status === "success" ? 0 : 1;
         if (status !== "success") {
           process.stderr.write(`[uagent] run failed (status=${status})${lastErrorMessage ? `: ${lastErrorMessage}` : ""}\n`);
         }
+      }
+
+      if (parsed.dumpHandle) {
+        const handle = await session.snapshot();
+        await writeSessionHandle(parsed.dumpHandle, handle);
+        process.stderr.write(`[uagent] wrote SessionHandle to ${parsed.dumpHandle}\n`);
       }
     } finally {
       await session.dispose().catch(() => undefined);
@@ -656,19 +852,25 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (parsed.provider === "codex" && parsed.network && process.env.CODEX_SANDBOX_NETWORK_DISABLED === "1") {
-    process.stderr.write("[uagent] Warning: CODEX_SANDBOX_NETWORK_DISABLED=1 is set; Codex sandbox network may be blocked.\n");
+  if (parsed.provider === "codex") {
+    if ((parsed.auto ?? "medium") !== "high" && process.env.CODEX_SANDBOX_NETWORK_DISABLED === "1") {
+      process.stderr.write("[uagent] Warning: CODEX_SANDBOX_NETWORK_DISABLED=1 is set; Codex sandbox network may be blocked.\n");
+    }
   }
 
-  const { runtime, session } = await openSession(
-    parsed.provider,
-    parsed.home,
-    parsed.workspace,
-    parsed.addDirs,
-    access,
-    parsed.model,
-    parsed.reasoningEffort,
-  );
+  const access = { auto: parsed.auto ?? "medium" };
+
+  const { runtime, session } = parsed.resumeHandle
+    ? await resumeSessionFromHandleFile(parsed.provider, parsed.home, parsed.resumeHandle, parsed.resumeOverrides ?? {})
+    : await openSession(
+        parsed.provider,
+        parsed.home,
+        parsed.workspace,
+        parsed.addDirs,
+        access,
+        parsed.model,
+        parsed.reasoningEffort,
+      );
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     while (true) {
@@ -681,6 +883,7 @@ async function main(): Promise<void> {
         trace: parsed.trace,
         traceRaw: parsed.traceRaw,
       });
+      if (session.sessionId) process.stderr.write(`[uagent] sessionId=${session.sessionId}\n`);
       if (status !== "success") {
         process.stdout.write(`(run status: ${status})\n`);
         if (lastErrorMessage) process.stderr.write(`[uagent] run failed (status=${status}): ${lastErrorMessage}\n`);
@@ -688,6 +891,11 @@ async function main(): Promise<void> {
     }
   } finally {
     rl.close();
+    if (parsed.dumpHandle) {
+      const handle = await session.snapshot();
+      await writeSessionHandle(parsed.dumpHandle, handle);
+      process.stderr.write(`[uagent] wrote SessionHandle to ${parsed.dumpHandle}\n`);
+    }
     await session.dispose().catch(() => undefined);
     await runtime.close().catch(() => undefined);
   }

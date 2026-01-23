@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/provider-claude",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -16,7 +16,7 @@
     "dist"
   ],
   "dependencies": {
-    "@unified-agent-sdk/runtime-core": "^0.3.0",
+    "@unified-agent-sdk/runtime-core": "^0.4.0",
     "@anthropic-ai/claude-agent-sdk": "*"
   },
   "scripts": {

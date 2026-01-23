@@ -20,20 +20,20 @@ test("mergeSessionHandleWithDefaults adds unified session config metadata from d
   assert.equal(entry.version, 1);
   assert.deepEqual(entry.sessionConfig, {
     workspace: { cwd: "/repo", additionalDirs: ["/extra"] },
-    access: { auto: "low", network: false, webSearch: false },
+    access: { auto: "low" },
     model: "gpt-5",
     reasoningEffort: "high",
   });
 });
 
-test("mergeSessionHandleWithDefaults merges default access with existing access", () => {
+test("mergeSessionHandleWithDefaults merges default access with existing access (sanitizing legacy flags)", () => {
   const handle = {
     provider: "@openai/codex-sdk",
     sessionId: "t2",
     metadata: {
       [UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY]: {
         version: 1,
-        sessionConfig: { access: { network: false } },
+        sessionConfig: { access: { auto: "low", network: false, webSearch: false } },
       },
       other: "preserved",
     },
@@ -46,6 +46,5 @@ test("mergeSessionHandleWithDefaults merges default access with existing access"
   assert.equal(merged.metadata.other, "preserved");
   const entry = merged.metadata[UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY];
   assert.equal(entry.version, 1);
-  assert.deepEqual(entry.sessionConfig.access, { auto: "medium", network: false, webSearch: false });
+  assert.deepEqual(entry.sessionConfig.access, { auto: "low" });
 });
-

@@ -42,15 +42,14 @@ const run = await session.run({
 
 See: [Structured Output](guides/structured-output.md)
 
-## 4) “Portable safety knobs” via `access`
+## 4) “Portable safety knob” via `access.auto`
 
 Use `SessionConfig.access` to express intent (read-only vs sandboxed vs unrestricted) in a provider-agnostic way:
 
 ```ts
 const session = await runtime.openSession({
-  config: { access: { auto: "medium", network: false, webSearch: false } },
+  config: { access: { auto: "medium" } },
 });
 ```
 
-See: [Configuration](guides/config.md), [Access & Sandboxing experiments](experiments/access.md), [Permission mapping (spec)](specs/permission.md)
-
+See: [Configuration](guides/config.md), [Permission E2E Testing](experiments/2026-01-23-permission-e2e-testing.md), [Permission mapping (spec)](specs/permission.md)

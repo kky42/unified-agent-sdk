@@ -43,10 +43,10 @@ While running, type `/exit` to quit.
 
 ## Examples
 
-Allow network (still no writes):
+Read-only sandbox with WebSearch (shell networking like `curl` may be blocked):
 
 ```sh
-node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex --auto low --network
+node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex --auto low
 ```
 
 Run with full autonomy (no sandbox / no restrictions):

@@ -24,7 +24,6 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Use Cases: use-cases.md
-  - Docs Map: docs-map.md
   - Guides:
       - Configuration: guides/config.md
       - Orchestrator: guides/orchestrator.md
@@ -34,8 +33,9 @@ nav:
       - Structured Output: guides/structured-output.md
   - Experiments:
       - Overview: experiments/index.md
-      - Access & Sandboxing: experiments/access.md
-      - In-Flight Reconfiguration: experiments/inflight-reconfiguration.md
+      - 2026-01-23: Access & Sandboxing: experiments/2026-01-23-access-sandboxing.md
+      - 2026-01-20: In-Flight Session Reconfiguration: experiments/2026-01-20-inflight-session-reconfiguration.md
+      - 2026-01-23: Permission E2E Testing: experiments/2026-01-23-permission-e2e-testing.md
   - Providers:
       - Codex: providers/codex.md
       - Claude: providers/claude.md
@@ -43,6 +43,7 @@ nav:
       - Packages: reference/packages.md
   - Specs:
       - Testing: specs/testing.md
+      - E2E Testing Principles: specs/e2e-testing-principles.md
       - Instruction Discovery: specs/instruction-discovery.md
       - Permission Mapping: specs/permission.md
       - Event Mapping: specs/event-mapping.md

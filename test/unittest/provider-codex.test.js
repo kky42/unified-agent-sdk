@@ -397,21 +397,19 @@ test("Codex adapter injects image placeholders to preserve multimodal part order
   }
 });
 
-test("Codex adapter maps unified SessionConfig.access into ThreadOptions (auto x network x webSearch + default)", async (t) => {
+test("Codex adapter maps unified SessionConfig.access into ThreadOptions (auto only + default)", async (t) => {
   const makeEvents = async function* (thread) {
     thread._id = "t_perm";
     yield { type: "thread.started", thread_id: "t_perm" };
     yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } };
   };
 
-  const cases = [{ name: "default", access: undefined, expected: { sandboxMode: "workspace-write", network: true, webSearch: true } }];
-  for (const auto of ["low", "medium", "high"]) {
-    for (const network of [false, true]) {
-      for (const webSearch of [false, true]) {
-        cases.push({ name: `auto=${auto} network=${network} webSearch=${webSearch}`, access: { auto, network, webSearch } });
-      }
-    }
-  }
+  const cases = [
+    { name: "default", access: undefined, expected: { sandboxMode: "workspace-write" } },
+    { name: "auto=low", access: { auto: "low" }, expected: { sandboxMode: "read-only" } },
+    { name: "auto=medium", access: { auto: "medium" }, expected: { sandboxMode: "workspace-write" } },
+    { name: "auto=high", access: { auto: "high" }, expected: { sandboxMode: "danger-full-access" } },
+  ];
 
   for (const c of cases) {
     await t.test(c.name, async () => {
@@ -429,17 +427,9 @@ test("Codex adapter maps unified SessionConfig.access into ThreadOptions (auto x
       assert.ok(codex.lastThreadOptions, "expected thread options to be captured");
       assert.equal(codex.lastThreadOptions.approvalPolicy, "never");
 
-      const expected =
-        c.expected ??
-        ({
-          sandboxMode: c.access.auto === "low" ? "read-only" : c.access.auto === "medium" ? "workspace-write" : "danger-full-access",
-          network: c.access.auto === "high" ? true : Boolean(c.access.network),
-          webSearch: c.access.auto === "high" ? true : Boolean(c.access.webSearch),
-        });
-
-      assert.equal(codex.lastThreadOptions.sandboxMode, expected.sandboxMode);
-      assert.equal(codex.lastThreadOptions.networkAccessEnabled, expected.network);
-      assert.equal(codex.lastThreadOptions.webSearchEnabled, expected.webSearch);
+      assert.equal(codex.lastThreadOptions.sandboxMode, c.expected.sandboxMode);
+      assert.equal(codex.lastThreadOptions.networkAccessEnabled, true);
+      assert.equal(codex.lastThreadOptions.webSearchEnabled, true);
       assert.equal(codex.lastThreadOptions.modelReasoningEffort, "medium");
     });
   }
@@ -484,7 +474,7 @@ test("Codex resumeSession restores unified session config from snapshot metadata
   const session = await runtime.openSession({
     config: {
       workspace: { cwd: "/repo", additionalDirs: ["/extra"] },
-      access: { auto: "low", network: false, webSearch: false },
+      access: { auto: "low" },
       model: "gpt-5",
       reasoningEffort: "high",
     },
@@ -506,7 +496,7 @@ test("Codex resumeSession restores unified session config from snapshot metadata
   assert.equal(codex.lastResumeThreadOptions.model, "gpt-5");
   assert.equal(codex.lastResumeThreadOptions.modelReasoningEffort, "high");
   assert.equal(codex.lastResumeThreadOptions.sandboxMode, "read-only");
-  assert.equal(codex.lastResumeThreadOptions.networkAccessEnabled, false);
-  assert.equal(codex.lastResumeThreadOptions.webSearchEnabled, false);
+  assert.equal(codex.lastResumeThreadOptions.networkAccessEnabled, true);
+  assert.equal(codex.lastResumeThreadOptions.webSearchEnabled, true);
   assert.equal(codex.lastResumeThreadOptions.approvalPolicy, "never");
 });

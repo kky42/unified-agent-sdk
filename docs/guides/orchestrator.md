@@ -39,7 +39,7 @@ const session = await runtime.openSession({
   config: {
     workspace: { cwd: process.cwd() },
     reasoningEffort: "medium",
-    access: { auto: "medium", network: true, webSearch: true },
+    access: { auto: "medium" },
     provider: {},
   },
 });
@@ -64,3 +64,4 @@ Notes:
 - `RunHandle.events` is a single-consumer stream; consume it promptly for streaming output/telemetry.
 - A `UnifiedSession` supports one active `run()` at a time; concurrent calls throw `SessionBusyError` (queue/schedule in your orchestrator).
 - `SessionConfig.access` is mapped into provider-native enforcement and does not behave identically across providers (see [Access](../specs/permission.md)).
+- If your orchestrator needs HTTP via shell tools (for example `curl` to `localhost`), use `access.auto="medium"` (portable); `auto="low"` is intentionally conservative.
