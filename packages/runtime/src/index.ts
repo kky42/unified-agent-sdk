@@ -14,6 +14,8 @@ export {
   type CodexSessionConfig,
 } from "@unified-agent-sdk/provider-codex";
 
+export { setupWorkspace, type SetupWorkspaceOptions } from "./workspace.js";
+
 import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
 
