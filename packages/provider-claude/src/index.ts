@@ -213,6 +213,11 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
     return { state: this.activeRunId ? "running" : "idle", activeRunId: this.activeRunId };
   }
 
+  private withSessionId<T extends RuntimeEvent>(event: T): T {
+    if (event.sessionId || !this.sessionId) return event;
+    return { ...event, sessionId: this.sessionId };
+  }
+
   async run(req: RunRequest<Partial<ClaudeSessionConfig>>): Promise<RunHandle> {
     if (this.activeRunId) throw new SessionBusyError(this.activeRunId);
     const runId = randomUUID() as UUID;
@@ -240,14 +245,18 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
         resolve(value);
       };
     });
+    const resolveResultWithSession = (value: Extract<RuntimeEvent, { type: "run.completed" }>) => {
+      resolveResult(this.withSessionId(value));
+    };
 
     this.activeRunId = runId;
     const events = new AsyncEventStream<RuntimeEvent>();
     void (async () => {
       try {
-        for await (const ev of this.runEvents(runId, req, abortController, resolveResult)) {
-          events.push(ev);
-          if (ev.type === "run.completed") {
+        for await (const ev of this.runEvents(runId, req, abortController, resolveResultWithSession)) {
+          const enriched = this.withSessionId(ev);
+          events.push(enriched);
+          if (enriched.type === "run.completed") {
             this.abortControllers.delete(runId);
             if (this.activeRunId === runId) this.activeRunId = undefined;
           }
@@ -263,10 +272,19 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
             raw: error,
           };
           if (!cancelled) {
-            events.push({ type: "error", atMs: Date.now(), runId, message: formatFailedMessage("Claude run failed", error), raw: error });
+            events.push(
+              this.withSessionId({
+                type: "error",
+                atMs: Date.now(),
+                runId,
+                message: formatFailedMessage("Claude run failed", error),
+                raw: error,
+              }),
+            );
           }
-          events.push(done);
-          resolveResult(done);
+          const enrichedDone = this.withSessionId(done);
+          events.push(enrichedDone);
+          resolveResult(enrichedDone);
         }
       } finally {
         removeExternalAbortListener?.();

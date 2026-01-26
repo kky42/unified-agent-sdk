@@ -163,6 +163,7 @@ export type RuntimeEvent =
   | {
       type: "assistant.delta";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       textDelta: string;
       raw?: unknown;
@@ -170,6 +171,7 @@ export type RuntimeEvent =
   | {
       type: "assistant.reasoning.delta";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       textDelta: string;
       raw?: unknown;
@@ -177,6 +179,7 @@ export type RuntimeEvent =
   | {
       type: "assistant.message";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       message: {
         text: string;
@@ -187,6 +190,7 @@ export type RuntimeEvent =
   | {
       type: "assistant.reasoning.message";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       message: {
         text: string;
@@ -196,6 +200,7 @@ export type RuntimeEvent =
   | {
       type: "provider.event";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       provider: ProviderId;
       payload: unknown;
@@ -204,6 +209,7 @@ export type RuntimeEvent =
   | {
       type: "tool.call";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       callId: UUID;
       toolName: string;
@@ -213,6 +219,7 @@ export type RuntimeEvent =
   | {
       type: "tool.result";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       callId: UUID;
       output: unknown;
@@ -221,6 +228,7 @@ export type RuntimeEvent =
   | {
       type: "run.completed";
       atMs: number;
+      sessionId?: string;
       runId: UUID;
       status: "success" | "error" | "cancelled";
       finalText?: string;
@@ -231,6 +239,7 @@ export type RuntimeEvent =
   | {
       type: "error";
       atMs: number;
+      sessionId?: string;
       runId?: UUID;
       message: string;
       code?: string;

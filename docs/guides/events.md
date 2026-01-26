@@ -17,6 +17,14 @@ for await (const ev of run.events) {
 
 ## Event model
 
+### Common fields
+
+- `type` — event discriminator
+- `atMs` — event timestamp (epoch ms)
+- `runId` — present on all events except `error` (which may omit it)
+- `sessionId` — present once the provider exposes a native session id; early events in the first run may omit it
+- `raw` — optional provider payload for debugging
+
 Common events:
 - `run.started`
 - `assistant.delta` / `assistant.message`

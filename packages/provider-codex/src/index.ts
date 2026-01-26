@@ -164,6 +164,11 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
     return { state: this.activeRunId ? "running" : "idle", activeRunId: this.activeRunId };
   }
 
+  private withSessionId<T extends RuntimeEvent>(event: T): T {
+    if (event.sessionId || !this.sessionId) return event;
+    return { ...event, sessionId: this.sessionId };
+  }
+
   async run(req: RunRequest<never>): Promise<RunHandle> {
     if (this.activeRunId) throw new SessionBusyError(this.activeRunId);
     const runId = randomUUID() as UUID;
@@ -196,6 +201,9 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
         resolve(value);
       };
     });
+    const resolveResultWithSession = (value: Extract<RuntimeEvent, { type: "run.completed" }>) => {
+      resolveResult(this.withSessionId(value));
+    };
 
     this.activeRunId = runId;
     const events = new AsyncEventStream<RuntimeEvent>();
@@ -207,11 +215,12 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
           images,
           turnOptions,
           unwrapStructuredOutput,
-          resolveResult,
+          resolveResultWithSession,
           abortController,
         )) {
-          events.push(ev);
-          if (ev.type === "run.completed") {
+          const enriched = this.withSessionId(ev);
+          events.push(enriched);
+          if (enriched.type === "run.completed") {
             this.abortControllers.delete(runId);
             if (this.activeRunId === runId) this.activeRunId = undefined;
           }
@@ -227,10 +236,19 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
             raw: error,
           };
           if (!cancelled) {
-            events.push({ type: "error", atMs: Date.now(), runId, message: formatFailedMessage("Codex run failed", error), raw: error });
+            events.push(
+              this.withSessionId({
+                type: "error",
+                atMs: Date.now(),
+                runId,
+                message: formatFailedMessage("Codex run failed", error),
+                raw: error,
+              }),
+            );
           }
-          events.push(done);
-          resolveResult(done);
+          const enrichedDone = this.withSessionId(done);
+          events.push(enrichedDone);
+          resolveResult(enrichedDone);
         }
       } finally {
         removeExternalAbortListener?.();
@@ -280,6 +298,10 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
 
       const streamed = await this.thread.runStreamed(codexInput, turnOptions);
       for await (const ev of streamed.events) {
+        if (ev.type === "thread.started") {
+          this.sessionId = ev.thread_id;
+        }
+
         yield* this.mapEvent(runId, ev, {
           setFinalText: (t) => {
             finalText = t;
@@ -288,10 +310,6 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
             reasoningText = t;
           },
         });
-
-        if (ev.type === "thread.started") {
-          this.sessionId = ev.thread_id;
-        }
 
         if (ev.type === "turn.completed") {
           const inputTokens = ev.usage.input_tokens;
