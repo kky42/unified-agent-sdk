@@ -39,9 +39,7 @@ Smoke tests use your local CLI auth state (by default `~/.claude` and `~/.codex`
 
 ## Integration tests (real API; opt-in)
 
-Integration tests also rely on local CLI auth state (by default `~/.claude` and `~/.codex`). If you prefer explicit credentials, set the usual provider env vars in your shell before running (they will be picked up by the SDKs):
-- Codex: `CODEX_API_KEY` or `OPENAI_API_KEY` (optional: `CODEX_MODEL`, `CODEX_BASE_URL`).
-- Claude: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` (optional: `CLAUDE_MODEL`, `ANTHROPIC_BASE_URL`).
+Integration tests rely on local CLI auth state (by default `~/.claude` and `~/.codex`). Ensure you are logged in for both providers before running.
 
 Run:
 

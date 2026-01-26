@@ -15,13 +15,6 @@ If you want provider-specific wiring only:
 npm install @unified-agent-sdk/runtime
 ```
 
-## Provide credentials
-
-This SDK delegates auth to the upstream provider SDKs/CLIs.
-
-- Codex: set `OPENAI_API_KEY` (or `CODEX_API_KEY`)
-- Claude: set `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`)
-
 ## Run your first session
 
 ```ts

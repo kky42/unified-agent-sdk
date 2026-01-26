@@ -24,7 +24,6 @@ This repo’s Codex adapter (`@unified-agent-sdk/provider-codex`) wraps `@openai
 import { CodexRuntime } from "@unified-agent-sdk/provider-codex";
 
 const runtime = new CodexRuntime({
-  client: { apiKey: process.env.OPENAI_API_KEY, baseUrl: process.env.CODEX_BASE_URL },
   defaults: {
     // You can set provider defaults here, but prefer `SessionConfig.access`
     // for orchestrator-friendly, portable access controls.

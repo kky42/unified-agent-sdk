@@ -58,10 +58,6 @@ Before running **real-provider e2e tests** (for example permission/access verifi
 
 Integration tests make real API calls and may incur cost. Run them explicitly via `npm run test:integration`.
 
-Auth:
-- Codex: `CODEX_API_KEY` (or `OPENAI_API_KEY`) (optional: `CODEX_MODEL`, `CODEX_BASE_URL`)
-- Claude: `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`) (optional: `CLAUDE_MODEL`, `ANTHROPIC_BASE_URL`)
-
 Home directory overrides (to avoid writing to user home):
 - `TEST_CLAUDE_HOME`: Override Claude home directory (default: `~/.claude`)
 - `TEST_CODEX_HOME`: Override Codex home directory (default: `~/.codex`)

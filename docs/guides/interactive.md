@@ -11,10 +11,6 @@ npm run build
 node packages/uagent/bin/uagent.js codex --workspace . --home ~/.codex
 ```
 
-Provider auth is still done via environment variables:
-- Codex: `CODEX_API_KEY` (or `OPENAI_API_KEY`)
-- Claude: `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`)
-
 ## Provider choice
 
 Run a specific provider by switching the first positional arg:
