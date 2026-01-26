@@ -26,6 +26,7 @@ nav:
   - Use Cases: use-cases.md
   - Guides:
       - Configuration: guides/config.md
+      - Instruction Files: guides/instruction-files.md
       - Orchestrator: guides/orchestrator.md
       - uagent CLI (Interactive): guides/interactive.md
       - Sessions: guides/sessions.md
