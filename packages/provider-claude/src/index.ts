@@ -1151,7 +1151,7 @@ function extractClaudeTokenUsage(usage: unknown): {
   total_tokens?: number;
 } {
   const u = usage as any;
-  const inputTokens = typeof u?.input_tokens === "number" ? u.input_tokens : typeof u?.inputTokens === "number" ? u.inputTokens : undefined;
+  const inputTokensBase = typeof u?.input_tokens === "number" ? u.input_tokens : typeof u?.inputTokens === "number" ? u.inputTokens : undefined;
   const outputTokens = typeof u?.output_tokens === "number" ? u.output_tokens : typeof u?.outputTokens === "number" ? u.outputTokens : undefined;
   const cacheReadTokens =
     typeof u?.cache_read_input_tokens === "number"
@@ -1166,10 +1166,14 @@ function extractClaudeTokenUsage(usage: unknown): {
         ? u.cacheCreationInputTokens
         : undefined;
 
-  const totalTokens =
-    [inputTokens, cacheReadTokens, cacheWriteTokens, outputTokens].every((x) => typeof x === "number")
-      ? (inputTokens as number) + (cacheReadTokens as number) + (cacheWriteTokens as number) + (outputTokens as number)
-      : undefined;
+  const inputTokens =
+    typeof inputTokensBase === "number"
+      ? inputTokensBase + (typeof cacheReadTokens === "number" ? cacheReadTokens : 0) + (typeof cacheWriteTokens === "number" ? cacheWriteTokens : 0)
+      : typeof cacheReadTokens === "number" || typeof cacheWriteTokens === "number"
+        ? (typeof cacheReadTokens === "number" ? cacheReadTokens : 0) + (typeof cacheWriteTokens === "number" ? cacheWriteTokens : 0)
+        : undefined;
+
+  const totalTokens = typeof inputTokens === "number" && typeof outputTokens === "number" ? inputTokens + outputTokens : undefined;
 
   return {
     input_tokens: inputTokens,

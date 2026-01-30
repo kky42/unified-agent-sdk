@@ -142,6 +142,39 @@ test("Claude adapter resolves run.result even when events are not consumed", asy
   assert.equal((await session.status()).state, "idle");
 });
 
+test("Claude adapter normalizes cache token usage into unified breakdown fields", async () => {
+  const runtime = new ClaudeRuntime({
+    query: () =>
+      (async function* () {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "ok",
+          structured_output: null,
+          total_cost_usd: 0,
+          duration_ms: 1,
+          usage: {
+            input_tokens: 3,
+            cache_read_input_tokens: 10,
+            cache_creation_input_tokens: 20,
+            output_tokens: 5,
+          },
+        };
+      })(),
+  });
+
+  const session = await runtime.openSession({ config: { workspace: { cwd: process.cwd() } } });
+  const run = await session.run({ input: { parts: [{ type: "text", text: "hello" }] } });
+
+  const done = await run.result;
+  assert.equal(done.status, "success");
+  assert.equal(done.usage.input_tokens, 33);
+  assert.equal(done.usage.cache_read_tokens, 10);
+  assert.equal(done.usage.cache_write_tokens, 20);
+  assert.equal(done.usage.output_tokens, 5);
+  assert.equal(done.usage.total_tokens, 38);
+});
+
 test("ClaudeSession.run rejects concurrent runs (SessionBusyError)", async () => {
   const runtime = new ClaudeRuntime({
     query: ({ options }) =>

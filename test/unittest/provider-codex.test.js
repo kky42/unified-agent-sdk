@@ -221,7 +221,7 @@ test("Codex adapter maps file_change to tool.call/tool.result (WorkspacePatchApp
   assert.deepEqual(result.output, { status: "completed", changes: [{ path: "src/example.ts", kind: "update" }] });
 });
 
-test("Codex adapter defaults cached_input_tokens to 0 and excludes cache tokens from total_tokens", async () => {
+test("Codex adapter defaults cached_input_tokens to 0 and does not double-count cache tokens in total_tokens", async () => {
   const runtime = new CodexRuntime({
     codex: new FakeCodex(async function* (thread) {
       thread._id = "t_usage";

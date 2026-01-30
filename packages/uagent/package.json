@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/uagent",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -14,7 +14,7 @@
     "dist"
   ],
   "dependencies": {
-    "@unified-agent-sdk/runtime": "^0.4.1"
+    "@unified-agent-sdk/runtime": "^0.4.2"
   },
   "scripts": {
     "build": "tsc -b",

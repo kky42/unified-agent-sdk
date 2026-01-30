@@ -180,6 +180,22 @@ When the Codex SDK adds streaming support, this adapter should work automaticall
 
 These events are not yet exposed in the TypeScript SDK types. Monitor [Codex releases](https://github.com/openai/codex/releases) for when this becomes available.
 
+## Token usage / cache breakdown
+
+On `run.completed`, `usage` follows the unified breakdown semantics documented in [Events](../guides/events.md#usage-semantics).
+
+Codex raw usage (`turn.completed.usage`) reports:
+
+- `input_tokens`
+- `cached_input_tokens` (subset of `input_tokens`)
+- `output_tokens`
+
+This SDK maps:
+
+- `usage.cache_read_tokens = usage.raw.cached_input_tokens` (or `0` if omitted)
+- `usage.cache_write_tokens = 0` (not reported by Codex)
+- `usage.total_tokens = usage.input_tokens + usage.output_tokens` (cache tokens are not added again)
+
 ## Practical tips
 
 - Prefer setting `CODEX_HOME` to a repo-local directory (e.g. `.cache/codex`) to avoid writing to the user home directory.

@@ -88,6 +88,15 @@ const run = await session.run({
 });
 ```
 
+### Token usage / cache breakdown
+
+On `run.completed`, `usage` follows the unified breakdown semantics documented in [Events](../guides/events.md#usage-semantics).
+
+Notable Claude-specific detail: the Claude Agent SDK can report cache tokens separately (for example `cache_read_input_tokens` / `cache_creation_input_tokens`) and may report `usage.input_tokens` as **non-cache** input only. This SDK normalizes the unified fields so that:
+
+- `usage.input_tokens = usage.raw.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens`
+- `usage.total_tokens = usage.input_tokens + usage.output_tokens`
+
 #### Thinking / “think mode”
 
 In `@anthropic-ai/claude-agent-sdk`, “think mode” (aka thinking) is controlled by the thinking-token budget (`maxThinkingTokens`). In this unified SDK, it is configured via the unified `reasoningEffort` preset.
