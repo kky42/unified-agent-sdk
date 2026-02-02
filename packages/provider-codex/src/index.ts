@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { readdir } from "node:fs/promises";
+import os from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { Codex, type CodexOptions, type Thread, type ThreadEvent, type ThreadOptions } from "@openai/codex-sdk";
 import type {
   AccessConfig,
@@ -23,6 +28,7 @@ import { AsyncEventStream, normalizeStructuredOutputSchema } from "@unified-agen
 
 export const PROVIDER_CODEX_SDK = "@openai/codex-sdk" as ProviderId;
 const CODEX_WORKSPACE_PATCH_APPLIED_TOOL_NAME = "WorkspacePatchApplied";
+const UNIFIED_AGENT_SDK_CODEX_USAGE_METADATA_KEY = "unifiedAgentSdkCodexUsage";
 
 /**
  * Tracks cumulative token usage across a Codex session.
@@ -33,6 +39,11 @@ interface CumulativeUsage {
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
+}
+
+interface CodexUsageMetadataV1 {
+  version: 1;
+  cumulativeUsage: CumulativeUsage;
 }
 
 /**
@@ -89,11 +100,13 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
   public readonly provider = PROVIDER_CODEX_SDK;
   private readonly codex: Codex;
   private readonly defaults?: ThreadOptions;
+  private readonly codexHome: string;
 
   constructor(config: CodexRuntimeConfig = {}) {
     const client = config.client ?? config.codexOptions;
     this.codex = config.codex ?? new Codex(client);
     this.defaults = config.defaults;
+    this.codexHome = resolveCodexHome(client);
   }
 
   async capabilities(): Promise<RuntimeCapabilities> {
@@ -130,6 +143,7 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
     const thread = this.codex.startThread(threadOptions);
     return new CodexSession({
       thread,
+      codexHome: this.codexHome,
       snapshotConfig: { workspace: init.config?.workspace, access, model, reasoningEffort },
     });
   }
@@ -139,6 +153,7 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
       throw new Error("Codex resumeSession requires sessionId (thread id).");
     }
     const restored = readUnifiedAgentSdkSessionConfig(handle);
+    const prevCumulativeUsage = readCodexUsageMetadata(handle);
     const access = normalizeAccess(restored?.access);
     const accessOptions = mapUnifiedAccessToCodex(access);
     const model = restored?.model;
@@ -157,6 +172,8 @@ export class CodexRuntime implements UnifiedAgentRuntime<CodexSessionConfig, nev
       sessionId: handle.sessionId,
       thread,
       baseMetadata: handle.metadata,
+      codexHome: this.codexHome,
+      prevCumulativeUsage,
       snapshotConfig: { workspace: restored?.workspace, access, model, reasoningEffort },
     });
   }
@@ -169,6 +186,7 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
   public sessionId?: string;
 
   private readonly thread: Thread;
+  private readonly codexHome: string;
   private readonly snapshotConfig: UnifiedAgentSdkSessionConfigSnapshot;
   private readonly baseMetadata?: Record<string, unknown>;
   private activeRunId: UUID | undefined;
@@ -176,18 +194,22 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
   private readonly lastAgentTextByItemId = new Map<string, string>();
   private readonly lastReasoningTextByItemId = new Map<string, string>();
   private readonly seenToolCallIds = new Set<string>();
-  private prevCumulativeUsage: CumulativeUsage | null = null;
+  private prevCumulativeUsage: CumulativeUsage | null;
 
   constructor(params: {
     sessionId?: string;
     thread: Thread;
+    codexHome: string;
     snapshotConfig: UnifiedAgentSdkSessionConfigSnapshot;
     baseMetadata?: Record<string, unknown>;
+    prevCumulativeUsage?: CumulativeUsage | null;
   }) {
     this.sessionId = params.sessionId;
     this.thread = params.thread;
+    this.codexHome = params.codexHome;
     this.snapshotConfig = params.snapshotConfig;
     this.baseMetadata = params.baseMetadata;
+    this.prevCumulativeUsage = params.prevCumulativeUsage ?? null;
   }
 
   async capabilities(): Promise<RuntimeCapabilities> {
@@ -354,6 +376,16 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
         });
 
         if (ev.type === "turn.completed") {
+          const contextLength =
+            this.sessionId && this.codexHome
+              ? await readCodexLastCallContextLengthFromSessionLog({
+                  codexHome: this.codexHome,
+                  threadId: this.sessionId,
+                  startAtMs: startedAt,
+                  endAtMs: Date.now(),
+                })
+              : undefined;
+
           const current: CumulativeUsage = {
             input_tokens: ev.usage.input_tokens,
             cached_input_tokens: typeof ev.usage.cached_input_tokens === "number" ? ev.usage.cached_input_tokens : 0,
@@ -369,6 +401,7 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
             cache_write_tokens: 0,
             output_tokens: delta.output_tokens,
             total_tokens: delta.input_tokens + delta.output_tokens,
+            context_length: contextLength,
             duration_ms: Date.now() - startedAt,
             raw: {
               ...ev.usage,
@@ -386,7 +419,6 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
             finalText,
             structuredOutput,
             usage: u,
-            total_usage: u,
             raw: { ...(ev as any), reasoningText },
           };
           completed = true;
@@ -708,7 +740,10 @@ class CodexSession implements UnifiedSession<CodexSessionConfig, never> {
     return {
       provider: PROVIDER_CODEX_SDK,
       sessionId: this.sessionId,
-      metadata: mergeMetadata(this.baseMetadata, encodeUnifiedAgentSdkMetadata(this.snapshotConfig)),
+      metadata: mergeMetadata(
+        mergeMetadata(this.baseMetadata, encodeUnifiedAgentSdkMetadata(this.snapshotConfig)),
+        encodeCodexUsageMetadata(this.prevCumulativeUsage),
+      ),
     };
   }
 
@@ -796,13 +831,177 @@ function readUnifiedAgentSdkSessionConfig(handle: SessionHandle): UnifiedAgentSd
   return out;
 }
 
+function readCodexUsageMetadata(handle: SessionHandle): CumulativeUsage | null {
+  const metadata = handle.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const raw = (metadata as Record<string, unknown>)[UNIFIED_AGENT_SDK_CODEX_USAGE_METADATA_KEY];
+  if (!raw || typeof raw !== "object") return null;
+
+  const parsed = raw as Partial<CodexUsageMetadataV1>;
+  if (parsed.version !== 1 || !parsed.cumulativeUsage || typeof parsed.cumulativeUsage !== "object") return null;
+
+  const usage = parsed.cumulativeUsage as Partial<CumulativeUsage>;
+  if (
+    typeof usage.input_tokens !== "number" ||
+    typeof usage.cached_input_tokens !== "number" ||
+    typeof usage.output_tokens !== "number"
+  ) {
+    return null;
+  }
+
+  if (usage.input_tokens < 0 || usage.cached_input_tokens < 0 || usage.output_tokens < 0) return null;
+
+  return {
+    input_tokens: usage.input_tokens,
+    cached_input_tokens: usage.cached_input_tokens,
+    output_tokens: usage.output_tokens,
+  };
+}
+
 function encodeUnifiedAgentSdkMetadata(sessionConfig: UnifiedAgentSdkSessionConfigSnapshot): Record<string, unknown> {
   const value: UnifiedAgentSdkSessionHandleMetadataV1 = { version: 1, sessionConfig };
   return { [UNIFIED_AGENT_SDK_SESSION_HANDLE_METADATA_KEY]: value };
 }
 
+function encodeCodexUsageMetadata(prevCumulativeUsage: CumulativeUsage | null): Record<string, unknown> {
+  if (!prevCumulativeUsage) return {};
+  const value: CodexUsageMetadataV1 = {
+    version: 1,
+    cumulativeUsage: prevCumulativeUsage,
+  };
+  return { [UNIFIED_AGENT_SDK_CODEX_USAGE_METADATA_KEY]: value };
+}
+
 function mergeMetadata(a: Record<string, unknown> | undefined, b: Record<string, unknown>): Record<string, unknown> {
   return { ...(a ?? {}), ...b };
+}
+
+function resolveCodexHome(client: CodexOptions | undefined): string {
+  const fromClient = client?.env?.CODEX_HOME;
+  if (typeof fromClient === "string" && fromClient.trim()) return fromClient.trim();
+
+  const fromProcess = process.env.CODEX_HOME;
+  if (typeof fromProcess === "string" && fromProcess.trim()) return fromProcess.trim();
+
+  return join(os.homedir(), ".codex");
+}
+
+async function readCodexLastCallContextLengthFromSessionLog(params: {
+  codexHome: string;
+  threadId: string;
+  startAtMs: number;
+  endAtMs: number;
+}): Promise<number | undefined> {
+  const logPath = await findCodexRolloutLogPath(params.codexHome, params.threadId, params.endAtMs);
+  if (!logPath) return undefined;
+
+  // Token count events can land slightly before/after the unified run timestamps.
+  const startMs = params.startAtMs - 1_000;
+  const endMs = params.endAtMs + 2_000;
+
+  let lastContextLength: number | undefined;
+
+  try {
+    const rl = createInterface({
+      input: createReadStream(logPath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+
+    for await (const line of rl) {
+      if (!line) continue;
+      let entry: any;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.type !== "event_msg") continue;
+
+      const payload = entry.payload;
+      if (!payload || typeof payload !== "object") continue;
+      if (payload.type !== "token_count") continue;
+
+      const atMs = Date.parse(entry.timestamp);
+      if (!Number.isFinite(atMs) || atMs < startMs || atMs > endMs) continue;
+
+      const info = payload.info;
+      if (!info || typeof info !== "object") continue;
+
+      const last = info.last_token_usage;
+      if (!last || typeof last !== "object") continue;
+
+      const inputTokens = last.input_tokens;
+      const outputTokens = last.output_tokens;
+      if (typeof inputTokens !== "number" || typeof outputTokens !== "number") continue;
+
+      lastContextLength = inputTokens + outputTokens;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return lastContextLength;
+}
+
+async function findCodexRolloutLogPath(codexHome: string, threadId: string, atMs: number): Promise<string | null> {
+  const sessionsDir = join(codexHome, "sessions");
+
+  const candidates = [new Date(atMs), new Date(atMs - 24 * 60 * 60 * 1000), new Date(atMs + 24 * 60 * 60 * 1000)];
+  for (const d of candidates) {
+    const yyyy = String(d.getFullYear());
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const dayDir = join(sessionsDir, yyyy, mm, dd);
+
+    let files: string[];
+    try {
+      files = await readdir(dayDir);
+    } catch {
+      continue;
+    }
+
+    const matches = files.filter((name) => name.includes(threadId) && name.endsWith(".jsonl"));
+    if (!matches.length) continue;
+
+    matches.sort();
+    return join(dayDir, matches[matches.length - 1]);
+  }
+
+  return findCodexRolloutLogPathFallback(sessionsDir, threadId);
+}
+
+async function findCodexRolloutLogPathFallback(sessionsDir: string, threadId: string): Promise<string | null> {
+  const stack = [sessionsDir];
+  let scanned = 0;
+  let best: { path: string; name: string } | null = null;
+
+  while (stack.length && scanned < 5_000) {
+    const dir = stack.pop();
+    if (!dir) break;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      scanned += 1;
+      if (scanned >= 5_000) break;
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(p);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".jsonl") || !entry.name.includes(threadId)) continue;
+      if (best === null || entry.name > best.name) best = { path: p, name: entry.name };
+    }
+  }
+
+  return best?.path ?? null;
 }
 
 function mapUnifiedAccessToCodex(access: Required<AccessConfig>): Partial<ThreadOptions> {

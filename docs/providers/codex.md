@@ -198,6 +198,12 @@ console.log(result.usage.output_tokens);  // Tokens for THIS turn only
 console.log(result.usage.total_tokens);   // input + output for THIS turn
 ```
 
+Note: when you `snapshot()` and later `resumeSession(handle)`, this SDK persists the last-seen cumulative usage totals in the session handle metadata so that `run.completed.usage` remains **per-turn** after resuming. If you resume from a bare thread id (no metadata), the first turn after resume may report cumulative totals.
+
+### `usage.context_length` (best-effort)
+
+When available, this adapter also populates `usage.context_length` as a best-effort estimate of the **final model call** context length for the turn (`input_tokens + output_tokens` for that final call). This is derived from Codex CLI session logs (`CODEX_HOME/sessions/**/rollout-*.jsonl`, `token_count` events) and can be `undefined` if the logs are unavailable or the expected token-count entries are missing.
+
 ### Field mapping
 
 Codex raw usage (`turn.completed.usage`) reports:

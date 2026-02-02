@@ -396,7 +396,6 @@ class ClaudeSession implements UnifiedSession<ClaudeSessionConfig, Partial<Claud
             finalText,
             structuredOutput,
             usage: mapped.result.usage,
-            total_usage: mapped.result.total_usage,
             raw: msg,
           };
           completed = true;
@@ -1023,7 +1022,6 @@ function mapClaudeMessage(
     finalText?: string;
     structuredOutput?: unknown;
     usage?: Usage;
-    total_usage?: Usage;
   };
 } {
   if (msg.type === "tool_progress") {
@@ -1120,10 +1118,10 @@ function mapClaudeMessage(
     const r = msg as SDKResultMessage;
     if (r.subtype === "success") {
       const success = r as SDKResultSuccess;
-      const usageForTurn = state?.lastAssistantMessageUsage ?? success.usage;
       const usageTotal = success.usage;
-      const tokenUsage = extractClaudeTokenUsage(usageForTurn);
       const totalTokenUsage = extractClaudeTokenUsage(usageTotal);
+      const lastCallTokenUsage = state ? extractClaudeTokenUsage(state.lastAssistantMessageUsage) : {};
+      const contextLength = lastCallTokenUsage.total_tokens ?? totalTokenUsage.total_tokens;
       const limits = extractClaudeModelLimits(success.modelUsage);
       return {
         events: [],
@@ -1132,17 +1130,11 @@ function mapClaudeMessage(
           finalText: success.result,
           structuredOutput: success.structured_output,
           usage: {
-            ...tokenUsage,
-            ...limits,
-            cost_usd: success.total_cost_usd,
-            duration_ms: success.duration_ms,
-            raw: usageForTurn,
-          },
-          total_usage: {
             ...totalTokenUsage,
             ...limits,
             cost_usd: success.total_cost_usd,
             duration_ms: success.duration_ms,
+            context_length: contextLength,
             raw: usageTotal,
           },
         },
@@ -1150,18 +1142,24 @@ function mapClaudeMessage(
     }
 
     const error = r as SDKResultError;
-    const usageForTurn = state?.lastAssistantMessageUsage ?? error.usage;
     const usageTotal = error.usage;
-    const tokenUsage = extractClaudeTokenUsage(usageForTurn);
     const totalTokenUsage = extractClaudeTokenUsage(usageTotal);
+    const lastCallTokenUsage = state ? extractClaudeTokenUsage(state.lastAssistantMessageUsage) : {};
+    const contextLength = lastCallTokenUsage.total_tokens ?? totalTokenUsage.total_tokens;
     const limits = extractClaudeModelLimits(error.modelUsage);
     return {
       events: [],
       result: {
         status: "error",
         finalText: error.errors?.join("\n") ?? undefined,
-        usage: { ...tokenUsage, ...limits, cost_usd: error.total_cost_usd, duration_ms: error.duration_ms, raw: usageForTurn },
-        total_usage: { ...totalTokenUsage, ...limits, cost_usd: error.total_cost_usd, duration_ms: error.duration_ms, raw: usageTotal },
+        usage: {
+          ...totalTokenUsage,
+          ...limits,
+          cost_usd: error.total_cost_usd,
+          duration_ms: error.duration_ms,
+          context_length: contextLength,
+          raw: usageTotal,
+        },
       },
     };
   }

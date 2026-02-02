@@ -198,3 +198,108 @@ test(
 	    await rm(base, { recursive: true, force: true });
 	  },
 	);
+
+test(
+  "Codex integration: usage normalization survives resumeSession",
+  { timeout: 120_000 },
+  async () => {
+    const base = await mkdtemp(join(os.tmpdir(), "unified-agent-sdk-codex-itest-"));
+    const workspaceDir = join(base, "workspace");
+    await mkdir(workspaceDir, { recursive: true });
+
+    const runtime1 = createRuntime({
+      provider: "@openai/codex-sdk",
+      home: codexHome,
+      defaultOpts: {
+        workspace: { cwd: workspaceDir },
+        access: { auto: "low" },
+        model: process.env.CODEX_MODEL,
+      },
+    });
+
+    const session1 = await runtime1.openSession({
+      config: { reasoningEffort: "low" },
+    });
+
+    const run1 = await session1.run({
+      input: {
+        parts: [
+          {
+            type: "text",
+            text: "Say hello in one sentence. Do not use tools.",
+          },
+        ],
+      },
+    });
+
+    let completed1;
+    for await (const ev of run1.events) {
+      if (ev.type === "run.completed") completed1 = ev;
+    }
+    assert.ok(completed1, "expected run.completed event for turn 1");
+    assert.equal(completed1.status, "success");
+    assert.ok(completed1.usage, "expected usage on turn 1");
+
+    const handle = await session1.snapshot();
+    await session1.dispose();
+    await runtime1.close();
+
+    const runtime2 = createRuntime({
+      provider: "@openai/codex-sdk",
+      home: codexHome,
+      defaultOpts: {
+        workspace: { cwd: workspaceDir },
+        access: { auto: "low" },
+        model: process.env.CODEX_MODEL,
+      },
+    });
+
+    const session2 = await runtime2.resumeSession(handle);
+    const run2 = await session2.run({
+      input: {
+        parts: [
+          {
+            type: "text",
+            text: "Say hello again in one sentence. Do not use tools.",
+          },
+        ],
+      },
+    });
+
+    let completed2;
+    for await (const ev of run2.events) {
+      if (ev.type === "run.completed") completed2 = ev;
+    }
+    assert.ok(completed2, "expected run.completed event for turn 2");
+    assert.equal(completed2.status, "success");
+    assert.ok(completed2.usage, "expected usage on turn 2");
+
+    const raw1 = completed1.usage.raw;
+    const raw2 = completed2.usage.raw;
+    assert.ok(raw1 && typeof raw1 === "object", "expected raw usage object for turn 1");
+    assert.ok(raw2 && typeof raw2 === "object", "expected raw usage object for turn 2");
+    assert.ok(raw1.__cumulative && typeof raw1.__cumulative === "object", "expected raw.__cumulative for turn 1");
+    assert.ok(raw2.__cumulative && typeof raw2.__cumulative === "object", "expected raw.__cumulative for turn 2");
+
+    const c1 = raw1.__cumulative;
+    const c2 = raw2.__cumulative;
+    assert.equal(typeof c1.input_tokens, "number");
+    assert.equal(typeof c1.cached_input_tokens, "number");
+    assert.equal(typeof c1.output_tokens, "number");
+    assert.equal(typeof c2.input_tokens, "number");
+    assert.equal(typeof c2.cached_input_tokens, "number");
+    assert.equal(typeof c2.output_tokens, "number");
+
+    assert.equal(typeof completed2.usage.input_tokens, "number");
+    assert.equal(typeof completed2.usage.cache_read_tokens, "number");
+    assert.equal(typeof completed2.usage.output_tokens, "number");
+
+    assert.equal(c2.input_tokens - c1.input_tokens, completed2.usage.input_tokens);
+    assert.equal(c2.output_tokens - c1.output_tokens, completed2.usage.output_tokens);
+    assert.equal(c2.cached_input_tokens - c1.cached_input_tokens, completed2.usage.cache_read_tokens);
+
+    await session2.dispose();
+    await runtime2.close();
+    await rm(base, { recursive: true, force: true });
+  },
+);
