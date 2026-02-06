@@ -54,13 +54,27 @@ Before running **real-provider e2e tests** (for example permission/access verifi
 - `npm run test:smoke` (real SDK + real API calls; local)
 - `npm run test:integration` (real SDK + real API calls)
 
+## Pre-commit validation (required)
+
+**Before committing any change that touches provider adapters, SDK dependencies, runtime-core types, or event mapping**, you must verify behavior with real provider requests:
+
+1. Run unit tests: `npm test`
+2. Run smoke tests against both providers: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_ERROR_REPORTING=1 npm run test:smoke`
+3. Run integration tests against both providers: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_ERROR_REPORTING=1 npm run test:integration`
+
+All three must pass before committing. Provider home directories default to `~/.claude` and `~/.codex` (the host machine's real credentials).
+
 ## Integration tests (opt-in)
 
 Integration tests make real API calls and may incur cost. Run them explicitly via `npm run test:integration`.
 
-Home directory overrides (to avoid writing to user home):
-- `TEST_CLAUDE_HOME`: Override Claude home directory (default: `~/.claude`)
-- `TEST_CODEX_HOME`: Override Codex home directory (default: `~/.codex`)
+The default provider home directories are:
+- Claude: `~/.claude`
+- Codex: `~/.codex`
+
+These can be overridden with environment variables when needed (e.g. CI or isolated profiles):
+- `TEST_CLAUDE_HOME`: Override Claude home directory
+- `TEST_CODEX_HOME`: Override Codex home directory
 - Always use an **absolute path** for `--home` / `home` / `TEST_*_HOME` (relative paths resolve against the session `workspace.cwd` and can silently use the wrong profile).
 
 Note: running the full integration/smoke suites expects both providers to be configured (missing credentials will fail the run).
