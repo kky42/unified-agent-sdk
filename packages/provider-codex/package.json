@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/provider-codex",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -16,8 +16,8 @@
     "dist"
   ],
   "dependencies": {
-    "@unified-agent-sdk/runtime-core": "^0.6.1",
-    "@openai/codex-sdk": "*"
+    "@unified-agent-sdk/runtime-core": "^0.6.2",
+    "@openai/codex-sdk": "^0.98.0"
   },
   "scripts": {
     "build": "tsc -b",

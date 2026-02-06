@@ -1,6 +1,6 @@
 {
   "name": "@unified-agent-sdk/runtime-core",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
